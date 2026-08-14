@@ -86,7 +86,7 @@
     const normalized = {
       ...fallbackActivity, ...activity, status: derivedStatus(activity),
       teamSize: Number(activity.teamSize || 3),
-      questionCount: Number(activity.questionCount || 5), seconds: Number(activity.seconds || 15),
+      questionCount: Number(activity.questionCount ?? 5), seconds: Number(activity.seconds || 15),
       nextIntervalSeconds: Math.min(10, Math.max(1, Number(activity.nextIntervalSeconds || 2))),
       baseScore: Number(activity.baseScore || 10), wrongScore: Number(activity.wrongScore ?? 0),
       bonusPerSecond: Number(activity.bonusPerSecond || 1), attempts: Number(activity.attempts || 1),
@@ -113,6 +113,11 @@
   function eligibility(activity) {
     return !activity.learnerIds?.length || activity.learnerIds.includes(currentUser.id);
   }
+  function visibleInLearnerSide(activity) {
+    if (['已下架', '暂不上架'].includes(activity.shelfStatus)) return false;
+    if (activity.shelfStatus === '定时上架' && activity.shelfAt) return Date.now() >= new Date(activity.shelfAt).getTime();
+    return true;
+  }
   const dataFingerprint = value => JSON.stringify(value);
   function updateRemainingLabels() {
     document.querySelectorAll('[data-remaining-id]').forEach(target => {
@@ -132,7 +137,7 @@
     if (!rows.length) {
       try { const local = JSON.parse(localStorage.getItem('xiaoe-pk-demo-v3') || 'null'); if (local) rows = [local]; } catch {}
     }
-    const nextActivities = (rows.length ? rows : [fallbackActivity]).map(normalizeActivity);
+    const nextActivities = (rows.length ? rows : [fallbackActivity]).map(normalizeActivity).filter(visibleInLearnerSide);
     const changed = previousFingerprint !== dataFingerprint(nextActivities);
     state.activities = nextActivities;
     const requested = params.get('activity');
@@ -162,7 +167,7 @@
   }
   function activityCard(activity, index) {
     const status = derivedStatus(activity), mode = activity.mode === '组队PK' ? `${activity.teamSize}人/队` : '1v1PK';
-    return `<article class="activity-card card" style="animation-delay:${index * 45}ms" data-activity="${escapeHtml(activity.id)}"><div class="pk-cover"><img src="${visualAssets.shield}" alt=""></div><div class="activity-main"><div class="activity-name"><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span><b>${escapeHtml(activity.name)}</b></div><div class="activity-meta">${mode} · 共${activity.questionCount}道题 · ${activity.seconds}秒/题</div><div class="countdown-text">${status === '进行中' ? `<span class="clock-mark"></span><span>剩余</span><b data-remaining-id="${escapeHtml(activity.id)}">${remainingText(activity)}</b><span>结束</span>` : `<span>${status === '未开始' ? formatDateTime(activity.startAt) + ' 开始' : formatDateTime(activity.endAt) + ' 结束'}</span>`}</div></div><span class="activity-arrow">›</span></article>`;
+    return `<article class="activity-card card" style="animation-delay:${index * 45}ms" data-activity="${escapeHtml(activity.id)}"><div class="pk-cover"><img src="${activity.cover || visualAssets.shield}" alt=""></div><div class="activity-main"><div class="activity-name"><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span><b>${escapeHtml(activity.name)}</b></div><div class="activity-meta">${mode} · 共${activity.questionCount}道题 · ${activity.seconds}秒/题</div><div class="countdown-text">${status === '进行中' ? `<span class="clock-mark"></span><span>剩余</span><b data-remaining-id="${escapeHtml(activity.id)}">${remainingText(activity)}</b><span>结束</span>` : `<span>${status === '未开始' ? formatDateTime(activity.startAt) + ' 开始' : formatDateTime(activity.endAt) + ' 结束'}</span>`}</div></div><span class="activity-arrow">›</span></article>`;
   }
   function filteredActivities() {
     return state.activities.filter(item => (state.activeTab === '全部' || derivedStatus(item) === state.activeTab) && (!state.search || item.name.includes(state.search)));
@@ -190,9 +195,10 @@
   }
   function renderDetail() {
     const a = state.activity, status = derivedStatus(a), allowed = eligibility(a), mode = a.mode === '组队PK' ? `${a.teamSize}人/队` : '1v1PK';
-    const disabled = status !== '进行中' || !allowed;
-    const action = !allowed ? '不在本场参赛范围' : status === '未开始' ? '活动未开始' : status === '已结束' ? '活动已结束' : a.mode === '组队PK' ? '查看我的队伍' : '开始匹配';
-    return `<section class="stage detail-stage" data-stage="DETAIL">${header('活动详情', true, true)}<div class="detail-summary card"><div class="pk-cover"><img src="${visualAssets.shield}" alt=""></div><div><div class="detail-name"><b>${escapeHtml(a.name)}</b><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span></div><h2>${mode} · 共${a.questionCount}道题 · ${a.seconds}秒/题</h2><p>${status === '进行中' ? `剩余 <strong data-detail-remaining>${remainingText(a)}</strong> 结束` : `${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}`}</p></div></div><h3 class="section-title">活动规则</h3><div class="rule-panel card">${ruleRows(a).map(([icon, title, text]) => `<div class="rule-line"><span class="rule-icon ${icon}"></span><div><b>${title}</b><p>${escapeHtml(text)}</p></div></div>`).join('')}</div><h3 class="section-title">活动时间</h3><div class="time-box card">${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${footer(`<span class="customer-service">联系客服</span><button class="btn primary" data-start ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
+    const configured = a.questionCount > 0;
+    const disabled = status !== '进行中' || !allowed || !configured;
+    const action = !configured ? '活动尚未配置题目' : !allowed ? '不在本场参赛范围' : status === '未开始' ? '活动未开始' : status === '已结束' ? '活动已结束' : a.mode === '组队PK' ? '查看我的队伍' : '开始匹配';
+    return `<section class="stage detail-stage" data-stage="DETAIL">${header('活动详情', true, true)}<div class="detail-summary card"><div class="pk-cover"><img src="${a.cover || visualAssets.shield}" alt=""></div><div><div class="detail-name"><b>${escapeHtml(a.name)}</b><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span></div><h2>${mode} · 共${a.questionCount}道题 · ${a.seconds}秒/题</h2><p>${status === '进行中' ? `剩余 <strong data-detail-remaining>${remainingText(a)}</strong> 结束` : `${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}`}</p></div></div><h3 class="section-title">活动规则</h3><div class="rule-panel card">${ruleRows(a).map(([icon, title, text]) => `<div class="rule-line"><span class="rule-icon ${icon}"></span><div><b>${title}</b><p>${escapeHtml(text)}</p></div></div>`).join('')}</div><h3 class="section-title">活动时间</h3><div class="time-box card">${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${footer(`<span class="customer-service">联系客服</span><button class="btn primary" data-start ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
   }
   function renderMatching() {
     const opponent = state.match?.opponent;
