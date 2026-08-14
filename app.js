@@ -115,6 +115,7 @@
   }
   function visibleInLearnerSide(activity) {
     if (['已下架', '暂不上架'].includes(activity.shelfStatus)) return false;
+    if (activity.storeDisplay === '隐藏') return false;
     if (activity.shelfStatus === '定时上架' && activity.shelfAt) return Date.now() >= new Date(activity.shelfAt).getTime();
     return true;
   }
