@@ -75,12 +75,13 @@
     return data;
   }
   function derivedStatus(activity) {
-    if (activity.manualEndedAt) return '已结束';
-    if (activity.manualStartedAt) return '进行中';
     const now = Date.now(), start = new Date(activity.startAt).getTime(), end = new Date(activity.endAt).getTime();
+    if (activity.manualEndedAt || activity.status === '已结束') return '已结束';
     if (Number.isFinite(end) && now >= end) return '已结束';
+    if (!(activity.questionSnapshot?.length || activity.questionCount > 0)) return '未开始';
+    if (activity.manualStartedAt) return '进行中';
     if (Number.isFinite(start) && now < start) return '未开始';
-    return activity.status || '进行中';
+    return '进行中';
   }
   function normalizeQuestion(question, index) {
     const fallback = fallbackQuestions[index % fallbackQuestions.length];

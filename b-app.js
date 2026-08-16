@@ -38,15 +38,24 @@
   });
   const demoRows=[
     {...defaultActivity(),id:'demo-new',name:'新员工产品知识PK赛',cover:covers[0].url,mode:'1v1PK',questionCount:5,sourceName:'新人产品知识试卷',questionSnapshot:questions.slice(0,5),status:'未开始',shelfStatus:'已上架',participants:86,createdAt:'2026-08-08 14:10:00'},
-    {...defaultActivity(),id:'demo-active',name:'产品知识部门挑战赛',cover:covers[1].url,mode:'组队PK',questionCount:5,sourceName:'企学院功能认知卷',questionSnapshot:questions.slice(0,5),status:'进行中',shelfStatus:'已上架',participants:120,createdAt:'2026-07-10 16:30:00'},
+    {...defaultActivity(),id:'demo-active',name:'产品知识部门挑战赛',cover:covers[1].url,mode:'组队PK',questionCount:5,sourceName:'企学院功能认知卷',questionSnapshot:questions.slice(0,5),status:'进行中',shelfStatus:'已上架',startAt:isoLocal(new Date(now.getTime()-24*60*60*1000)),endAt:isoLocal(new Date(now.getTime()+6*24*60*60*1000)),participants:120,createdAt:'2026-07-10 16:30:00'},
     {...defaultActivity(),id:'demo-ended',name:'信息安全挑战赛',cover:covers[2].url,mode:'1v1PK',questionCount:4,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,4),status:'已结束',shelfStatus:'已下架',participants:72,createdAt:'2026-07-01 09:20:00'}
   ];
   const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),userSearch:'',userDepartment:'全部',userParticipation:'全部'};
   const app=document.querySelector('#app'),breadcrumb=document.querySelector('#breadcrumb'),modalRoot=document.querySelector('#modalRoot'),toastEl=document.querySelector('#toast');
   const escapeHtml=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}};
-  const saveActivity=a=>{a.updatedAt=new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-');localStorage.setItem(KEY,JSON.stringify(a));try{new BroadcastChannel('xiaoe-pk-demo').postMessage(a)}catch{};window.parent?.postMessage({type:'PK_CONFIG_UPDATED',config:a},'*')};
-  const getRows=()=>{const saved=getSaved();return saved?[saved,...demoRows.filter(x=>x.id!==saved.id)]:demoRows};
+  const derivedStatus=activity=>{
+    const now=Date.now(),start=new Date(activity.startAt).getTime(),end=new Date(activity.endAt).getTime();
+    if(activity.manualEndedAt||activity.status==='已结束')return '已结束';
+    if(Number.isFinite(end)&&now>=end)return '已结束';
+    if(!(activity.questionSnapshot?.length||activity.questionCount>0))return '未开始';
+    if(activity.manualStartedAt)return '进行中';
+    if(Number.isFinite(start)&&now<start)return '未开始';
+    return '进行中';
+  };
+  const saveActivity=a=>{a.status=derivedStatus(a);a.updatedAt=new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-');localStorage.setItem(KEY,JSON.stringify(a));try{new BroadcastChannel('xiaoe-pk-demo').postMessage(a)}catch{};window.parent?.postMessage({type:'PK_CONFIG_UPDATED',config:a},'*')};
+  const getRows=()=>{const saved=getSaved(),rows=saved?[saved,...demoRows.filter(x=>x.id!==saved.id)]:demoRows;return rows.map(x=>({...x,status:derivedStatus(x)}))};
   const toast=text=>{toastEl.textContent=text;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),1800)};
   const setBreadcrumb=text=>breadcrumb.textContent=text;
   const statusDot=s=>s==='进行中'?'green':s==='未开始'?'blue':'';
@@ -74,9 +83,9 @@
     app.querySelectorAll('[data-data]').forEach(b=>b.onclick=()=>{if(!b.disabled)openDetail(b.dataset.data,'data')});
     app.querySelectorAll('[data-share]').forEach(b=>b.onclick=()=>openShare(findActivity(b.dataset.share)));
     app.querySelectorAll('[data-more]').forEach(b=>b.onclick=e=>{e.stopPropagation();state.moreId=state.moreId===b.dataset.more?null:b.dataset.more;renderList()});
-    app.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.copy);state.current={...item,id:'pk-'+Date.now(),name:item.name+'（副本）',status:'未开始',shelfStatus:'暂不上架',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-')};state.view='create';render()});
+    app.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.copy);state.current={...item,id:'pk-'+Date.now(),name:item.name+'（副本）',status:'未开始',manualStartedAt:null,manualEndedAt:null,shelfStatus:'暂不上架',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-')};state.view='create';render()});
     app.querySelectorAll('[data-shelf]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.shelf);item.shelfStatus=item.shelfStatus==='已下架'?'已上架':'已下架';saveActivity(item);state.moreId=null;render()});
-    app.querySelectorAll('[data-end]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.end);item.status='已结束';saveActivity(item);state.moreId=null;render()});
+    app.querySelectorAll('[data-end]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.end);item.status='已结束';item.manualEndedAt=new Date().toISOString();saveActivity(item);state.moreId=null;render()});
     app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.delete);if(getSaved()?.id===item.id)localStorage.removeItem(KEY);state.moreId=null;toast('PK赛已删除');render()});
   }
   function findActivity(id){return getRows().find(x=>x.id===id)||getRows()[0]}
