@@ -2,7 +2,7 @@
   'use strict';
 
   const Stage = Object.freeze({
-    HOME: 'HOME', LIST: 'LIST', DETAIL: 'DETAIL', MATCHING: 'MATCHING',
+    HOME: 'HOME', LIST: 'LIST', INTRO: 'INTRO', DETAIL: 'DETAIL', ROOMS: 'ROOMS', MATCHING: 'MATCHING',
     TEAM_WAITING: 'TEAM_WAITING', TEAM_READY: 'TEAM_READY', COUNTDOWN: 'COUNTDOWN',
     QUESTION: 'QUESTION', SUBMITTED_WAITING: 'SUBMITTED_WAITING',
     QUESTION_RESULT: 'QUESTION_RESULT', MATCH_RESULT: 'MATCH_RESULT',
@@ -17,7 +17,7 @@
   ];
   const fallbackActivity = {
     id: 'pk-demo-fallback', name: '产品知识组队体验赛', description: '通过实时知识对战巩固产品与服务规范。',
-    status: '进行中', mode: '组队PK', teamSize: 3,
+    status: '进行中', mode: '1v1PK', teamSize: 3,
     groupMatchMode: 'department_vs_department', participantDepartments: ['产品中心', '客户成功部'], aiFallback: true, questionCount: 5, seconds: 15, nextIntervalSeconds: 2,
     baseScore: 10, wrongScore: -2, timeBonus: true, bonusPerSecond: 1,
     sourceName: '新人产品知识试卷', learnerIds: ['u1', 'u2', 'u4', 'u7'], attempts: 5,
@@ -45,8 +45,16 @@
     activities: [], activity: null, activeTab: '全部', search: '', questions: [],
     questionIndex: 0, selected: null, timeLeft: 15, countdown: 3,
     lobby: null, match: null, currentResult: null, history: [], reviewIndex: 0, reviewTab: '全部题目',
-    myScore: 0, opponentScore: 0, matchingMessage: '', matchError: '', exiting: false, shareData: null, timers: []
+    myScore: 0, opponentScore: 0, matchingMessage: '', matchError: '', exiting: false, shareData: null,
+    rooms: [], modal: null, selectedOpponents: [], inviteRoomId: null,
+    answerSync: null, reconnectRoom: null, timers: []
   };
+  const learnerCandidates = [
+    { id: 'u2', name: '王二', department: '产品中心', avatar: avatarAssets.blue[1] },
+    { id: 'u4', name: '李四', department: '客户成功部', avatar: avatarAssets.red[0] },
+    { id: 'u5', name: '赵五', department: '销售一部', avatar: avatarAssets.red[1] },
+    { id: 'u6', name: '陈六', department: '交付中心', avatar: avatarAssets.red[2] }
+  ];
 
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const delay = ms => fast ? Math.min(ms, 500) : ms;
@@ -144,7 +152,7 @@
     const requested = params.get('activity');
     const currentId = preserve ? state.activity?.id : null;
     if (requested || currentId) state.activity = state.activities.find(item => item.id === (requested || currentId)) || null;
-    if (requested && state.activity) state.stage = Stage.DETAIL;
+    if (requested && state.activity) state.stage = hasEnteredActivity(state.activity.id) ? Stage.DETAIL : Stage.INTRO;
     if (state.activity) setActivity(state.activity);
     const shouldRender = forceRender || changed || !app.firstElementChild;
     if (shouldRender) { clearTimers(); render(); }
@@ -155,6 +163,48 @@
     state.activity = normalizeActivity(activity);
     state.questions = state.activity.questionSnapshot;
     state.timeLeft = state.activity.seconds;
+    loadRooms();
+  }
+  const enteredKey = activityId => `xiaoe-pk-entered:${activityId}:${currentUser.id}`;
+  const roomKey = activityId => `xiaoe-pk-rooms:${activityId}`;
+  const sessionKey = (activityId, roomId = '') => `xiaoe-pk-session:${activityId}:${currentUser.id}${roomId ? `:${roomId}` : ''}`;
+  const hasEnteredActivity = activityId => localStorage.getItem(enteredKey(activityId)) === '1';
+  function initialRooms(activityId) {
+    return [
+      { id: `${activityId}-invite`, owner: learnerCandidates[1], opponent: null, invitedIds: [currentUser.id], status: 'waiting', createdAt: Date.now() - 180000 },
+      { id: `${activityId}-live`, owner: learnerCandidates[0], opponent: learnerCandidates[3], invitedIds: [], status: 'in_progress', connected: { u2: true, u6: true }, createdAt: Date.now() - 420000 }
+    ];
+  }
+  function loadRooms() {
+    if (!state.activity) return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(roomKey(state.activity.id)) || 'null');
+      state.rooms = Array.isArray(saved) ? saved : initialRooms(state.activity.id);
+    } catch { state.rooms = initialRooms(state.activity.id); }
+  }
+  function saveRooms() {
+    if (!state.activity) return;
+    localStorage.setItem(roomKey(state.activity.id), JSON.stringify(state.rooms));
+  }
+  function activeOwnedRoom() {
+    return state.rooms.find(room =>
+      (room.owner?.id === currentUser.id || room.opponent?.id === currentUser.id) &&
+      room.connected?.[currentUser.id] !== false &&
+      ['waiting', 'in_progress'].includes(room.status)
+    );
+  }
+  function persistSession(extra = {}) {
+    if (!state.activity || !state.match) return;
+    localStorage.setItem(sessionKey(state.activity.id, state.match.roomId), JSON.stringify({
+      roomId: state.match.roomId, match: state.match, questionIndex: state.questionIndex,
+      history: state.history, myScore: state.myScore, opponentScore: state.opponentScore,
+      selected: state.selected, timeLeft: state.timeLeft, stage: state.stage,
+      answerSync: state.answerSync, savedAt: Date.now(), ...extra
+    }));
+  }
+  function loadSession(roomId = state.match?.roomId || state.reconnectRoom?.id) {
+    try { return JSON.parse(localStorage.getItem(sessionKey(state.activity.id, roomId)) || 'null'); }
+    catch { return null; }
   }
 
   function header(title, back = true, share = false) {
@@ -175,11 +225,39 @@
   }
   function renderActivityRows() {
     const rows = filteredActivities();
-    return rows.length ? `${rows.map(activityCard).join('')}<div class="mode-promo"><div><b>组队PK，高团队荣誉</b><span>AI陪练 · 实时对战 · 团队协作</span></div><img src="${avatarAssets.mascot}" alt=""></div><div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>没有更多活动了</span></div>` : `<div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>该分类暂无PK赛</span></div>`;
+    return rows.length ? `${rows.map(activityCard).join('')}<div class="mode-promo"><div><b>1v1PK，实时知识对战</b><span>创建房间 · 邀请同事 · 独立答题</span><em>组队PK 后续开放</em></div><img src="${avatarAssets.mascot}" alt=""></div><div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>没有更多活动了</span></div>` : `<div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>该分类暂无PK赛</span></div>`;
   }
   function renderList() {
     const tabs = ['全部', '进行中', '未开始', '已结束'];
     return `<section class="stage no-footer list-stage" data-stage="LIST">${header('PK赛', false)}<label class="search"><input id="activitySearch" value="${escapeHtml(state.search)}" placeholder="搜索活动名称" aria-label="搜索活动名称"></label><nav class="tabs">${tabs.map(tab => `<button class="${state.activeTab === tab ? 'active' : ''}" data-tab="${tab}">${tab}</button>`).join('')}<i class="tab-indicator" style="transform:translateX(${tabs.indexOf(state.activeTab) * 100}%)"></i></nav><div class="activity-list">${renderActivityRows()}</div><nav class="pk-bottom-nav"><button data-home><i>⌂</i>首页</button><button><i>▣</i>学习</button><button class="active"><i>PK</i>PK赛</button><button><i>♙</i>我的</button></nav></section>`;
+  }
+  function renderIntro() {
+    const a = state.activity, status = derivedStatus(a);
+    const groupDisabled = a.mode === '组队PK';
+    return `<section class="stage intro-stage" data-stage="INTRO">${header('PK赛介绍')}<div class="intro-hero"><img src="${a.cover || visualAssets.shield}" alt=""><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span><div><small>1V1 知识对战</small><h2>${escapeHtml(a.name)}</h2><p>${escapeHtml(a.description || '与同事实时对战，在比拼中巩固知识。')}</p></div></div><div class="intro-stats card"><div><b>${a.questionCount}</b><span>对战题数</span></div><div><b>${a.seconds}s</b><span>每题答题时间</span></div><div><b>${a.attempts}</b><span>每日挑战次数</span></div></div><h3 class="section-title">PK赛说明</h3><div class="intro-rules card"><p><i>1</i>双方独立完成同一道题，一方先提交不会影响另一方作答。</p><p><i>2</i>双方都提交或答题时间结束后，统一展示本题结果。</p><p><i>3</i>答题正确且用时更短，可获得更高分数。</p></div><div class="intro-time card"><span>活动时间</span><b>${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</b></div>${groupDisabled ? '<div class="phase-note">组队PK将在后续版本开放，本期仅支持1v1PK。</div>' : ''}${footer(`<button class="btn primary" data-enter-activity ${groupDisabled ? 'disabled' : ''}>${groupDisabled ? '组队PK 敬请期待' : '进入PK赛'}</button>`)}</section>`;
+  }
+  function roomPerson(person, fallback = '等待对手') {
+    if (!person) return `<div class="room-person empty"><span>＋</span><b>${fallback}</b></div>`;
+    const avatar = person.avatar || (person.id === currentUser.id ? avatarAssets.learner : avatarAssets.red[0]);
+    return `<div class="room-person"><img src="${avatar}" alt=""><b>${escapeHtml(person.name)}</b><small>${escapeHtml(person.department || '')}</small></div>`;
+  }
+  function roomAction(room) {
+    const mine = room.owner?.id === currentUser.id || room.opponent?.id === currentUser.id;
+    const disconnected = mine && room.connected?.[currentUser.id] === false;
+    if (disconnected) return '<button class="room-btn reconnect" data-reconnect-room>重新连接</button>';
+    if (room.status === 'in_progress') return `<button class="room-btn" ${mine ? 'data-open-room' : 'disabled'}>${mine ? '返回对局' : '对局进行中'}</button>`;
+    if (room.owner?.id === currentUser.id) return '<div class="room-actions"><button class="room-link" data-leave-room>退出房间</button><button class="room-btn invite" data-invite-opponents>邀请对手</button></div>';
+    if (room.invitedIds?.includes(currentUser.id)) return '<button class="room-btn join" data-join-room>接受邀请</button>';
+    return '<button class="room-btn join" data-join-room>立即加入</button>';
+  }
+  function roomCard(room) {
+    const statusText = room.status === 'in_progress' ? '对局进行中' : room.owner?.id === currentUser.id ? '等待对手应战' : room.invitedIds?.includes(currentUser.id) ? '邀请你加入' : '可加入';
+    return `<article class="duel-room card" data-room-id="${escapeHtml(room.id)}"><div class="room-head"><span class="room-status ${room.status}">${statusText}</span><time>${new Date(room.createdAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</time></div><div class="room-versus">${roomPerson(room.owner)}<strong>VS</strong>${roomPerson(room.opponent)}</div><div class="room-foot"><span>${room.status === 'in_progress' ? `第 ${Number(room.questionIndex || 0) + 1} 题进行中` : `${state.activity.questionCount}题 · 每题${state.activity.seconds}秒`}</span>${roomAction(room)}</div></article>`;
+  }
+  function renderRooms() {
+    const own = activeOwnedRoom();
+    const incoming = state.rooms.filter(room => room.status === 'waiting' && room.invitedIds?.includes(currentUser.id) && room.owner?.id !== currentUser.id).length;
+    return `<section class="stage rooms-stage" data-stage="ROOMS">${header('1v1 对战大厅')}<div class="arena-banner"><div><small>KNOWLEDGE ARENA</small><h2>${escapeHtml(state.activity.name)}</h2><p>创建房间邀请同事，或接受邀请加入对局</p></div><img src="${visualAssets.shield}" alt=""></div><div class="mode-switch"><button class="active">1v1PK</button><button disabled>组队PK <small>后续开放</small></button></div>${incoming ? `<div class="invite-alert"><span>⚡</span><div><b>你收到 ${incoming} 个对战邀请</b><p>接受邀请即可进入对局</p></div></div>` : ''}<div class="room-toolbar"><div><b>对战房间</b><span>${state.rooms.length} 个房间</span></div><button class="create-room" data-create-room ${own ? 'disabled' : ''}>＋ 创建房间</button></div><div class="room-list">${state.rooms.length ? state.rooms.map(roomCard).join('') : '<div class="room-empty">暂无房间，创建一个房间邀请同事对战吧</div>'}</div>${own ? '<p class="owned-room-tip">同一时间只能参与一场未结束的对局。退出当前房间后，才可创建或加入其他房间。</p>' : ''}</section>`;
   }
   function ruleRows(a) {
     const rows = [
@@ -197,8 +275,8 @@
   function renderDetail() {
     const a = state.activity, status = derivedStatus(a), allowed = eligibility(a), mode = a.mode === '组队PK' ? `${a.teamSize}人/队` : '1v1PK';
     const configured = a.questionCount > 0;
-    const disabled = status !== '进行中' || !allowed || !configured;
-    const action = !configured ? '活动尚未配置题目' : !allowed ? '不在本场参赛范围' : status === '未开始' ? '活动未开始' : status === '已结束' ? '活动已结束' : a.mode === '组队PK' ? '查看我的队伍' : '开始匹配';
+    const disabled = status !== '进行中' || !allowed || !configured || a.mode === '组队PK';
+    const action = !configured ? '活动尚未配置题目' : !allowed ? '不在本场参赛范围' : status === '未开始' ? '活动未开始' : status === '已结束' ? '活动已结束' : a.mode === '组队PK' ? '组队PK 敬请期待' : '开始匹配';
     return `<section class="stage detail-stage" data-stage="DETAIL">${header('活动详情', true, true)}<div class="detail-summary card"><div class="pk-cover"><img src="${a.cover || visualAssets.shield}" alt=""></div><div><div class="detail-name"><b>${escapeHtml(a.name)}</b><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span></div><h2>${mode} · 共${a.questionCount}道题 · ${a.seconds}秒/题</h2><p>${status === '进行中' ? `剩余 <strong data-detail-remaining>${remainingText(a)}</strong> 结束` : `${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}`}</p></div></div><h3 class="section-title">活动规则</h3><div class="rule-panel card">${ruleRows(a).map(([icon, title, text]) => `<div class="rule-line"><span class="rule-icon ${icon}"></span><div><b>${title}</b><p>${escapeHtml(text)}</p></div></div>`).join('')}</div><h3 class="section-title">活动时间</h3><div class="time-box card">${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${footer(`<span class="customer-service">联系客服</span><button class="btn primary" data-start ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
   }
   function renderMatching() {
@@ -256,7 +334,10 @@
   }
   function renderSubmitted() {
     const q = state.questions[state.questionIndex];
-    return `<section class="stage no-footer submitted-stage battle-stage" data-stage="SUBMITTED_WAITING">${header('提交等待', false)}${scoreBoard()}<div class="question-head"><span class="question-index">第 ${state.questionIndex + 1} 题 / 共 ${state.questions.length} 题</span><button class="rule-link">规则</button></div><div class="waiting-panel"><div><img class="waiting-mascot" src="${avatarAssets.mascot}" alt=""><b>${state.activity.mode === '组队PK' ? '等待双方队伍完成本题' : '等待对方提交答案'}</b><p>${state.activity.mode === '组队PK' ? '双方全部完成后统一展示本题结果' : '双方完成后统一展示本题结果'}</p><div class="answer-progress"><span class="done">我方已提交</span><span>${state.activity.mode === '组队PK' ? '对方队伍作答中' : '对手作答中'}</span><span>统一展示</span></div><div class="wait-dots"><i></i><i></i><i></i></div></div></div><div class="submitted-question"><span>${q.type || '单选题'}</span><p>${escapeHtml(q.title)}</p><b>${escapeHtml(answerText(q,state.selected))}</b></div></section>`;
+    const opponentDone = state.answerSync?.opponentSubmitted;
+    const opponentOnline = state.answerSync?.opponentConnected !== false;
+    const opponentCopy = opponentDone ? '对手已提交' : opponentOnline ? '对手作答中' : '对手已离线，等待本题结束';
+    return `<section class="stage no-footer submitted-stage battle-stage" data-stage="SUBMITTED_WAITING">${header('提交等待', false)}${scoreBoard()}<div class="question-head"><span class="question-index">第 ${state.questionIndex + 1} 题 / 共 ${state.questions.length} 题</span><button class="rule-link">规则</button></div><div class="waiting-panel"><div><img class="waiting-mascot" src="${avatarAssets.mascot}" alt=""><b>${opponentDone ? '双方均已完成本题' : '等待对手完成本题'}</b><p>双方独立作答；双方都提交或答题时间结束后，统一展示结果</p><div class="answer-progress"><span class="done">我方已提交</span><span class="${opponentDone ? 'done opponent-done' : ''}">${opponentCopy}</span><span class="${opponentDone ? 'done reveal-ready' : ''}">统一展示</span></div><div class="wait-dots"><i></i><i></i><i></i></div></div></div><div class="submitted-question"><span>${q.type || '单选题'}</span><p>${escapeHtml(q.title)}</p><b>${escapeHtml(answerText(q,state.selected))}</b></div></section>`;
   }
   function answerText(question, value) {
     const indexes = answerIndexes(value);
@@ -265,9 +346,9 @@
   function renderQuestionResult() {
     const q = state.questions[state.questionIndex], result = state.currentResult;
     const isLast = state.questionIndex >= state.questions.length - 1;
-    const correctIndexes = answerIndexes(q.correct), myIndexes = answerIndexes(result.mySelected), opponentIndexes = answerIndexes(result.opponentSelected);
-    const resultOptions = q.options.map((text,index)=>{const correct=correctIndexes.includes(index),mine=myIndexes.includes(index),opponent=opponentIndexes.includes(index);return `<div class="result-option ${correct?'correct':''} ${mine&&!correct?'wrong':''}"><b>${String.fromCharCode(65+index)}</b><span>${escapeHtml(text)}</span>${correct?'<i>✓</i>':mine?'<i>×</i>':''}</div>`}).join('');
-    return `<section class="stage question-result-stage battle-stage" data-stage="QUESTION_RESULT">${header('答题结果', false)}${scoreBoard()}<div class="question-head"><span class="question-index">第 ${state.questionIndex + 1} 题 / 共 ${state.questions.length} 题</span><span class="result-badge">${q.type || '单选题'}</span></div><h2 class="question-title">${escapeHtml(q.title)}</h2><div class="result-options">${resultOptions}</div><div class="answer-compare card"><div class="answer-side mine"><span class="answer-label">我方答案</span><div class="answer-value">${escapeHtml(answerText(q, result.mySelected))}</div><span class="answer-status ${result.myCorrect ? '' : 'wrong'}">${result.myCorrect ? '答对' : '答错'}　${result.myDelta > 0 ? `+${result.myDelta} 分` : `${result.myDelta} 分`}</span></div><div class="answer-side opponent"><span class="answer-label">对方答案</span><div class="answer-value">${escapeHtml(answerText(q, result.opponentSelected))}</div><span class="answer-status ${result.opponentCorrect ? '' : 'wrong'}">${result.opponentCorrect ? '答对' : '答错'}　${result.opponentDelta > 0 ? `+${result.opponentDelta} 分` : `${result.opponentDelta} 分`}</span></div></div><div class="result-insight"><b>${result.myCorrect ? '回答正确！' : '本题答错'}</b><span>${result.myCorrect ? `获得 ${result.myDelta} 分` : `正确答案：${escapeHtml(answerText(q,q.correct))}`}</span></div>${footer(`<button class="btn primary" data-next>${isLast ? `查看对局结果（${state.activity.nextIntervalSeconds}s）` : `下一题（${state.activity.nextIntervalSeconds}s）`}</button>`)}</section>`;
+    const myStatus = result.mySelected === null ? '未作答' : result.myCorrect ? '答对' : '答错';
+    const opponentStatus = result.opponentSelected === null ? '未作答' : result.opponentCorrect ? '答对' : '答错';
+    return `<section class="stage question-result-stage battle-stage" data-stage="QUESTION_RESULT">${header('答题结果', false)}${scoreBoard()}<div class="question-head"><span class="question-index">第 ${state.questionIndex + 1} 题 / 共 ${state.questions.length} 题</span><span class="result-badge">本题结果</span></div><h2 class="question-title">${escapeHtml(q.title)}</h2><div class="answer-compare card"><div class="answer-side mine"><span class="answer-label">我方答案</span><div class="answer-value">${escapeHtml(answerText(q, result.mySelected))}</div><span class="answer-status ${result.myCorrect ? '' : 'wrong'}">${myStatus}　${result.myDelta > 0 ? `+${result.myDelta} 分` : `${result.myDelta} 分`}</span><small>用时 ${result.myElapsed ?? '-'} 秒</small></div><div class="answer-side opponent"><span class="answer-label">对方答案</span><div class="answer-value">${escapeHtml(answerText(q, result.opponentSelected))}</div><span class="answer-status ${result.opponentCorrect ? '' : 'wrong'}">${opponentStatus}　${result.opponentDelta > 0 ? `+${result.opponentDelta} 分` : `${result.opponentDelta} 分`}</span><small>${result.opponentSelected === null ? '本题无作答记录' : `用时 ${result.opponentElapsed ?? '-'} 秒`}</small></div></div><p class="result-privacy-note">正确答案将在对局结束后的答题回顾中展示</p>${footer(`<button class="btn primary" data-next>${isLast ? `查看对局结果（${state.activity.nextIntervalSeconds}s）` : `下一题（${state.activity.nextIntervalSeconds}s）`}</button>`)}</section>`;
   }
   function matchSummary() {
     const myCorrect = state.history.filter(item => item.myCorrect).length, opponentCorrect = state.history.filter(item => item.opponentCorrect).length;
@@ -292,9 +373,25 @@
     if (!state.shareData) return '';
     return `<div class="c-modal" data-share-layer><div class="c-dialog"><button class="dialog-close" data-close-share aria-label="关闭">×</button><h2>邀请队友</h2><p>邀请本部门同事加入本场PK赛</p><img src="${escapeHtml(state.shareData.qrCodeUrl)}" alt="PK赛邀请二维码"><div class="share-link-row"><input value="${escapeHtml(state.shareData.shareUrl)}" readonly><button data-copy-invite>复制</button></div><small>${escapeHtml(state.shareData.accessHint || '')}</small></div></div>`;
   }
-  const renderers = { HOME: renderHome, LIST: renderList, DETAIL: renderDetail, MATCHING: renderMatching, TEAM_WAITING: renderTeamWaiting, TEAM_READY: renderTeamReady, COUNTDOWN: renderCountdown, QUESTION: renderQuestion, SUBMITTED_WAITING: renderSubmitted, QUESTION_RESULT: renderQuestionResult, MATCH_RESULT: renderMatchResult, REVIEW_OVERVIEW: renderReviewOverview, REVIEW: renderReview };
+  function flowModal() {
+    if (!state.modal) return '';
+    if (state.modal === 'opponents') {
+      return `<div class="c-modal"><div class="opponent-sheet"><div class="sheet-head"><button data-close-modal>×</button><h2>邀请对手</h2><span>可多选</span></div><label class="candidate-search">⌕ <input placeholder="搜索姓名或部门"></label><div class="candidate-list">${learnerCandidates.map(person => `<button class="candidate ${state.selectedOpponents.includes(person.id) ? 'selected' : ''}" data-candidate="${person.id}"><span class="check">${state.selectedOpponents.includes(person.id) ? '✓' : ''}</span><img src="${person.avatar}" alt=""><span><b>${person.name}</b><small>${person.department}</small></span></button>`).join('')}</div><div class="sheet-foot"><span>已选中 ${state.selectedOpponents.length} 人</span><button data-confirm-selection ${state.selectedOpponents.length ? '' : 'disabled'}>确定</button></div></div></div>`;
+    }
+    if (state.modal === 'confirm-invite') {
+      return `<div class="c-modal"><div class="game-dialog"><span class="dialog-bolt">⚡</span><h2>发送对战邀请</h2><p>将向已选择的 ${state.selectedOpponents.length} 位学员发送PK邀请，对方可从本活动的对战大厅加入。</p><button class="btn primary" data-send-invite>确认发送</button></div></div>`;
+    }
+    if (state.modal === 'room-conflict') {
+      return `<div class="c-modal"><div class="game-dialog"><span class="dialog-bolt warn">!</span><h2>已有进行中的房间</h2><p>请先退出自己创建或正在参与的房间，再加入其他对战。</p><button class="btn primary" data-close-modal>我知道了</button></div></div>`;
+    }
+    if (state.modal === 'reconnect') {
+      return `<div class="c-modal"><div class="game-dialog"><span class="dialog-bolt reconnect">↻</span><h2>重新连接对局</h2><p>检测到你有一场尚未结束的PK，对局仍在继续。是否返回原对局？</p><div class="dialog-actions"><button class="btn" data-dismiss-reconnect>暂不连接</button><button class="btn primary" data-confirm-reconnect>重新连接</button></div></div></div>`;
+    }
+    return '';
+  }
+  const renderers = { HOME: renderHome, LIST: renderList, INTRO: renderIntro, DETAIL: renderDetail, ROOMS: renderRooms, MATCHING: renderMatching, TEAM_WAITING: renderTeamWaiting, TEAM_READY: renderTeamReady, COUNTDOWN: renderCountdown, QUESTION: renderQuestion, SUBMITTED_WAITING: renderSubmitted, QUESTION_RESULT: renderQuestionResult, MATCH_RESULT: renderMatchResult, REVIEW_OVERVIEW: renderReviewOverview, REVIEW: renderReview };
   function render() {
-    app.innerHTML = renderers[state.stage]() + inviteModal();
+    app.innerHTML = renderers[state.stage]() + inviteModal() + flowModal();
     bind();
     afterRender();
   }
@@ -304,14 +401,146 @@
     render();
   }
   function back() {
-    const previous = { LIST: Stage.HOME, DETAIL: Stage.LIST, MATCHING: Stage.DETAIL, TEAM_WAITING: Stage.DETAIL, TEAM_READY: Stage.DETAIL, COUNTDOWN: Stage.DETAIL, QUESTION: Stage.DETAIL, SUBMITTED_WAITING: Stage.QUESTION, QUESTION_RESULT: Stage.QUESTION, MATCH_RESULT: Stage.DETAIL, REVIEW_OVERVIEW: Stage.MATCH_RESULT, REVIEW: Stage.REVIEW_OVERVIEW };
+    const previous = { LIST: Stage.HOME, INTRO: Stage.LIST, DETAIL: Stage.LIST, ROOMS: Stage.DETAIL, MATCHING: Stage.ROOMS, TEAM_WAITING: Stage.DETAIL, TEAM_READY: Stage.DETAIL, COUNTDOWN: Stage.ROOMS, QUESTION: Stage.ROOMS, SUBMITTED_WAITING: Stage.QUESTION, QUESTION_RESULT: Stage.QUESTION, MATCH_RESULT: Stage.ROOMS, REVIEW_OVERVIEW: Stage.MATCH_RESULT, REVIEW: Stage.REVIEW_OVERVIEW };
     setStage(previous[state.stage] || Stage.HOME, false);
   }
   function bindActivityCards() {
     document.querySelectorAll('[data-activity]').forEach(card => card.onclick = () => {
       const activity = state.activities.find(item => item.id === card.dataset.activity);
-      if (activity) { setActivity(activity); setStage(Stage.DETAIL); }
+      if (activity) { setActivity(activity); setStage(hasEnteredActivity(activity.id) ? Stage.DETAIL : Stage.INTRO); }
     });
+  }
+  function enterActivity() {
+    localStorage.setItem(enteredKey(state.activity.id), '1');
+    setStage(Stage.DETAIL);
+  }
+  function currentPerson() {
+    return { id: currentUser.id, name: currentUser.name, department: currentUser.department, avatar: avatarAssets.learner };
+  }
+  function createRoomFlow() {
+    if (activeOwnedRoom()) { state.modal = 'room-conflict'; render(); return; }
+    state.inviteRoomId = null;
+    state.selectedOpponents = [];
+    state.modal = 'opponents'; render();
+  }
+  function inviteMore(room) {
+    if (!room || room.owner?.id !== currentUser.id || room.status !== 'waiting') return;
+    state.inviteRoomId = room.id;
+    state.selectedOpponents = [...(room.invitedIds || [])];
+    state.modal = 'opponents'; render();
+  }
+  function toggleCandidate(id) {
+    state.selectedOpponents = state.selectedOpponents.includes(id)
+      ? state.selectedOpponents.filter(item => item !== id)
+      : [...state.selectedOpponents, id];
+    render();
+  }
+  function confirmOpponentSelection() {
+    if (!state.selectedOpponents.length) return;
+    state.modal = 'confirm-invite'; render();
+  }
+  function sendRoomInvites() {
+    const existing = state.inviteRoomId ? state.rooms.find(room => room.id === state.inviteRoomId) : null;
+    if (existing) existing.invitedIds = [...new Set([...(existing.invitedIds || []), ...state.selectedOpponents])];
+    else {
+      const room = {
+        id: `${state.activity.id}-${Date.now()}`, owner: currentPerson(), opponent: null,
+        invitedIds: [...state.selectedOpponents], status: 'waiting', connected: { [currentUser.id]: true }, createdAt: Date.now()
+      };
+      state.rooms.unshift(room);
+    }
+    saveRooms(); state.modal = null; state.selectedOpponents = []; state.inviteRoomId = null;
+    render();
+  }
+  function roomFromElement(element) {
+    const card = element?.closest('[data-room-id]');
+    return card ? state.rooms.find(item => item.id === card.dataset.roomId) : null;
+  }
+  function joinRoom(room) {
+    if (!room) return;
+    const owned = activeOwnedRoom();
+    if (owned && owned.id !== room.id) { state.modal = 'room-conflict'; render(); return; }
+    if (room.status === 'in_progress') {
+      if (room.connected?.[currentUser.id] === false) { state.reconnectRoom = room; state.modal = 'reconnect'; render(); }
+      else openExistingRoom(room);
+      return;
+    }
+    room.opponent = currentPerson(); room.status = 'in_progress'; room.connected = { [room.owner.id]: true, [currentUser.id]: true }; room.questionIndex = 0;
+    saveRooms();
+    state.match = { id: `local-${room.id}`, roomId: room.id, mode: '1v1PK', opponent: room.owner };
+    state.matchingMessage = `已接受 ${room.owner.name} 的邀请`;
+    setStage(Stage.MATCHING);
+    setTimer(beginCountdown, 1200);
+  }
+  function openExistingRoom(room) {
+    const other = room.owner.id === currentUser.id ? room.opponent : room.owner;
+    state.match = { id: `local-${room.id}`, roomId: room.id, mode: '1v1PK', opponent: other || learnerCandidates[1] };
+    const saved = loadSession(room.id);
+    if (saved?.roomId === room.id) {
+      state.reconnectRoom = room; state.modal = 'reconnect'; render();
+    } else startRoomMatch(room);
+  }
+  function confirmReconnect() {
+    const saved = loadSession(state.reconnectRoom?.id);
+    if (!saved) { state.modal = null; startRoomMatch(state.reconnectRoom); return; }
+    state.match = saved.match; state.questionIndex = Number(saved.questionIndex || 0); state.history = saved.history || [];
+    state.myScore = Number(saved.myScore || 0); state.opponentScore = Number(saved.opponentScore || 0);
+    state.selected = saved.selected ?? null; state.timeLeft = Math.max(1, Number(saved.timeLeft || state.activity.seconds));
+    state.answerSync = saved.answerSync || null;
+    const room = state.rooms.find(item => item.id === saved.roomId);
+    if (room) {
+      const roomQuestionIndex = Math.min(Number(room.questionIndex || 0), state.questions.length - 1);
+      while (state.questionIndex < roomQuestionIndex) {
+        const missedIndex = state.questionIndex;
+        const question = state.questions[missedIndex];
+        const opponentSelected = question.correct;
+        const myDelta = Number(state.activity.wrongScore || 0);
+        const opponentDelta = Number(state.activity.baseScore || 0);
+        state.myScore += myDelta;
+        state.opponentScore += opponentDelta;
+        state.history[missedIndex] = {
+          mySelected: null,
+          opponentSelected,
+          myCorrect: false,
+          opponentCorrect: true,
+          myDelta,
+          opponentDelta,
+          myElapsed: null,
+          opponentElapsed: Math.max(2, Number(state.activity.seconds || 15) - 4),
+          myScore: state.myScore,
+          opponentScore: state.opponentScore,
+          disconnected: true
+        };
+        state.questionIndex++;
+      }
+      room.connected = { ...(room.connected || {}), [currentUser.id]: true };
+      saveRooms();
+    }
+    state.selected = isMulti(state.questions[state.questionIndex]) ? [] : null;
+    state.timeLeft = Number(state.activity.seconds || 15);
+    state.answerSync = null;
+    state.modal = null; state.reconnectRoom = null; setStage(Stage.QUESTION);
+  }
+  function startRoomMatch(room) {
+    if (!room) return;
+    const other = room.owner.id === currentUser.id ? room.opponent : room.owner;
+    state.match = { id: `local-${room.id}`, roomId: room.id, mode: '1v1PK', opponent: other || learnerCandidates[1] };
+    room.status = 'in_progress';
+    room.opponent ||= other || learnerCandidates[1];
+    room.connected = { ...(room.connected || {}), [room.owner.id]: true, [room.opponent.id]: true, [currentUser.id]: true };
+    room.questionIndex = 0;
+    saveRooms();
+    state.questionIndex = 0; state.selected = null; state.history = []; state.currentResult = null;
+    state.myScore = 0; state.opponentScore = 0; state.answerSync = null;
+    persistSession();
+    beginCountdown();
+  }
+  function currentRoom() {
+    return state.match?.roomId ? state.rooms.find(room => room.id === state.match.roomId) : null;
+  }
+  function leaveWaitingRoom(room) {
+    if (!room || room.owner?.id !== currentUser.id || room.status !== 'waiting') return;
+    state.rooms = state.rooms.filter(item => item.id !== room.id); saveRooms(); render();
   }
   function selectOption(index) {
     const q = state.questions[state.questionIndex];
@@ -330,9 +559,22 @@
     document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { state.activeTab = button.dataset.tab; render(); });
     document.getElementById('activitySearch')?.addEventListener('input', event => { state.search = event.target.value; const list = document.querySelector('.activity-list'); if (list) { list.innerHTML = renderActivityRows(); bindActivityCards(); } });
     bindActivityCards();
+    document.querySelector('[data-enter-activity]')?.addEventListener('click', enterActivity);
+    document.querySelector('[data-create-room]')?.addEventListener('click', createRoomFlow);
+    document.querySelectorAll('[data-invite-opponents]').forEach(button => button.onclick = () => inviteMore(roomFromElement(button)));
+    document.querySelectorAll('[data-candidate]').forEach(button => button.onclick = () => toggleCandidate(button.dataset.candidate));
+    document.querySelector('[data-confirm-selection]')?.addEventListener('click', confirmOpponentSelection);
+    document.querySelector('[data-send-invite]')?.addEventListener('click', sendRoomInvites);
+    document.querySelectorAll('[data-close-modal]').forEach(button => button.onclick = () => { state.modal = null; state.inviteRoomId = null; render(); });
+    document.querySelectorAll('[data-join-room]').forEach(button => button.onclick = () => joinRoom(roomFromElement(button)));
+    document.querySelectorAll('[data-open-room]').forEach(button => button.onclick = () => openExistingRoom(roomFromElement(button)));
+    document.querySelectorAll('[data-reconnect-room]').forEach(button => button.onclick = () => { state.reconnectRoom = roomFromElement(button); state.modal = 'reconnect'; render(); });
+    document.querySelectorAll('[data-leave-room]').forEach(button => button.onclick = () => leaveWaitingRoom(roomFromElement(button)));
+    document.querySelector('[data-confirm-reconnect]')?.addEventListener('click', confirmReconnect);
+    document.querySelector('[data-dismiss-reconnect]')?.addEventListener('click', () => { state.modal = null; state.reconnectRoom = null; render(); });
     document.querySelector('[data-start]')?.addEventListener('click', startMatchFlow);
     document.querySelector('[data-retry]')?.addEventListener('click', startDuelMatch);
-    document.querySelector('[data-cancel-match]')?.addEventListener('click', () => { state.match = null; state.matchError = ''; setStage(Stage.DETAIL); });
+    document.querySelector('[data-cancel-match]')?.addEventListener('click', () => { state.match = null; state.matchError = ''; setStage(Stage.ROOMS); });
     document.querySelector('[data-leave]')?.addEventListener('click', requestExit);
     document.querySelector('[data-exit-pk]')?.addEventListener('click', requestExit);
     document.querySelector('[data-invite]')?.addEventListener('click', openInvite);
@@ -380,7 +622,8 @@
   }
   function startMatchFlow() {
     if (derivedStatus(state.activity) !== '进行中' || !eligibility(state.activity)) return;
-    state.activity.mode === '组队PK' ? startTeamLobby() : startDuelMatch();
+    if (state.activity.mode === '组队PK') return;
+    loadRooms(); setStage(Stage.ROOMS);
   }
   async function startDuelMatch() {
     state.match = null; state.matchError = ''; state.matchingMessage = '正在从本场在线参赛学员中随机匹配';
@@ -451,7 +694,7 @@
   }
   async function requestExit() {
     const inProgress = [Stage.COUNTDOWN, Stage.QUESTION, Stage.SUBMITTED_WAITING, Stage.QUESTION_RESULT].includes(state.stage);
-    const message = inProgress ? '退出后本次对局将终止，当前成绩不会计入结果。确认退出吗？' : '退出后将离开当前匹配或组队队列。确认退出吗？';
+    const message = inProgress ? '退出后，对手仍可继续完成本场对局；你可以在对局结束前重新连接。确认退出吗？' : '确认离开当前页面吗？';
     if (!confirm(message)) return;
     state.exiting = true;
     clearTimers();
@@ -462,7 +705,19 @@
         await api(`/api/matches/${state.match.id}/exit`, { method: 'POST', body: JSON.stringify({ userId: currentUser.id }) });
       }
     } catch (error) { console.info('退出状态同步失败：', error.message); }
-    state.match = null; state.lobby = null; state.currentResult = null; state.exiting = false; setStage(Stage.DETAIL);
+    const room = currentRoom();
+    if (room && inProgress) {
+      room.connected = { ...(room.connected || {}), [currentUser.id]: false };
+      persistSession({ disconnected: true });
+      const ownerOnline = room.connected?.[room.owner?.id] !== false;
+      const opponentOnline = room.opponent ? room.connected?.[room.opponent.id] !== false : false;
+      if (!ownerOnline && !opponentOnline) {
+        state.rooms = state.rooms.filter(item => item.id !== room.id);
+        localStorage.removeItem(sessionKey(state.activity.id, room.id));
+      }
+      saveRooms();
+    }
+    state.match = null; state.lobby = null; state.currentResult = null; state.exiting = false; setStage(Stage.ROOMS);
   }
   async function openInvite() {
     try {
@@ -495,16 +750,27 @@
       if (state.timeLeft <= 0) submitAnswer(true);
     }, 250);
   }
-  function localResult(question, selected, elapsed) {
-    const myCorrect = sameAnswer(selected, question.correct), opponentSelected = question.options.length > 1 ? (answerIndexes(question.correct)[0] + 1) % question.options.length : 0, opponentCorrect = sameAnswer(opponentSelected, question.correct);
+  function localResult(question, selected, elapsed, opponentConnected = true) {
+    const myCorrect = sameAnswer(selected, question.correct);
+    const opponentSelected = opponentConnected ? (state.questionIndex % 3 === 1 ? answerIndexes(question.correct)[0] : (answerIndexes(question.correct)[0] + 1) % question.options.length) : null;
+    const opponentCorrect = opponentSelected !== null && sameAnswer(opponentSelected, question.correct);
+    const opponentElapsed = opponentConnected ? Math.min(state.activity.seconds, Math.max(elapsed + (state.questionIndex % 2 ? -2 : 3), 2)) : state.activity.seconds;
     let myDelta = myCorrect ? state.activity.baseScore : state.activity.wrongScore, opponentDelta = opponentCorrect ? state.activity.baseScore : state.activity.wrongScore;
-    if (state.activity.timeBonus && myCorrect && opponentCorrect) myDelta += Math.max(0, state.activity.seconds - elapsed - 2) * state.activity.bonusPerSecond;
-    return { mySelected: selected, opponentSelected, myCorrect, opponentCorrect, myDelta, opponentDelta, myElapsed: elapsed, opponentElapsed: Math.min(state.activity.seconds, elapsed + 2), myScore: state.myScore + myDelta, opponentScore: state.opponentScore + opponentDelta };
+    if (state.activity.timeBonus && myCorrect && opponentCorrect) {
+      const timeDiff = Math.abs(opponentElapsed - elapsed) * state.activity.bonusPerSecond;
+      if (elapsed < opponentElapsed) myDelta += timeDiff;
+      else if (opponentElapsed < elapsed) opponentDelta += timeDiff;
+    }
+    return { mySelected: selected, opponentSelected, myCorrect, opponentCorrect, myDelta, opponentDelta, myElapsed: elapsed, opponentElapsed, myScore: state.myScore + myDelta, opponentScore: state.opponentScore + opponentDelta };
   }
   async function submitAnswer(timeout) {
     if (!timeout && !hasSelection()) return;
     clearTimers(); const question = state.questions[state.questionIndex], selected = hasSelection() ? state.selected : null, elapsed = state.activity.seconds - state.timeLeft;
-    state.currentResult = null; setStage(Stage.SUBMITTED_WAITING);
+    const room = currentRoom();
+    const opponentId = state.match?.opponent?.id;
+    const opponentConnected = !room || !opponentId || room.connected?.[opponentId] !== false;
+    state.answerSync = { mySubmitted: true, opponentSubmitted: false, opponentConnected };
+    state.currentResult = null; setStage(Stage.SUBMITTED_WAITING); persistSession();
     try {
       let result;
       if (apiEnabled && state.match?.id && !String(state.match.id).startsWith('local-')) {
@@ -516,10 +782,16 @@
           if (revealed.status === 'revealed') result = revealed.result;
         }
       } else {
-        await new Promise(resolve => setTimeout(resolve, delay(state.activity.mode === '组队PK' ? 1200 : 900)));
-        result = localResult(question, selected, elapsed);
+        const simulatedOpponentElapsed = opponentConnected ? Math.min(state.activity.seconds, Math.max(elapsed + (state.questionIndex % 2 ? -2 : 3), 2)) : state.activity.seconds;
+        const waitSeconds = opponentConnected ? Math.max(1, simulatedOpponentElapsed - elapsed) : Math.max(1, state.activity.seconds - elapsed);
+        await new Promise(resolve => setTimeout(resolve, delay(waitSeconds * 1000)));
+        state.answerSync.opponentSubmitted = true; render();
+        await new Promise(resolve => setTimeout(resolve, delay(450)));
+        result = localResult(question, selected, elapsed, opponentConnected);
       }
-      state.currentResult = result; state.myScore = Number(result.myScore); state.opponentScore = Number(result.opponentScore); state.history[state.questionIndex] = result; setStage(Stage.QUESTION_RESULT);
+      state.currentResult = result; state.myScore = Number(result.myScore); state.opponentScore = Number(result.opponentScore); state.history[state.questionIndex] = result;
+      if (room) { room.questionIndex = state.questionIndex; saveRooms(); }
+      persistSession(); setStage(Stage.QUESTION_RESULT);
     } catch (error) { alert(error.message); state.selected = selected; setStage(Stage.QUESTION); }
   }
   function scheduleNext() {
@@ -528,11 +800,22 @@
   }
   function nextQuestion() {
     clearTimers();
-    if (state.questionIndex >= state.questions.length - 1) { setStage(Stage.MATCH_RESULT); return; }
-    state.questionIndex++; state.selected = isMulti(state.questions[state.questionIndex]) ? [] : null; state.timeLeft = state.activity.seconds; setStage(Stage.QUESTION);
+    if (state.questionIndex >= state.questions.length - 1) {
+      const room = currentRoom();
+      if (room) {
+        room.status = 'completed';
+        state.rooms = state.rooms.filter(item => item.id !== room.id);
+        saveRooms();
+      }
+      localStorage.removeItem(sessionKey(state.activity.id, room?.id || state.match?.roomId));
+      setStage(Stage.MATCH_RESULT); return;
+    }
+    state.questionIndex++; state.selected = isMulti(state.questions[state.questionIndex]) ? [] : null; state.timeLeft = state.activity.seconds; state.answerSync = null;
+    const room = currentRoom(); if (room) { room.questionIndex = state.questionIndex; saveRooms(); }
+    persistSession(); setStage(Stage.QUESTION);
   }
   function resetMatch() {
-    state.questionIndex = 0; state.selected = null; state.history = []; state.currentResult = null; state.myScore = 0; state.opponentScore = 0; state.match = null; state.lobby = null; startMatchFlow();
+    state.questionIndex = 0; state.selected = null; state.history = []; state.currentResult = null; state.myScore = 0; state.opponentScore = 0; state.match = null; state.lobby = null; state.answerSync = null; startMatchFlow();
   }
   async function onConfigUpdated() {
     clearTimers();
