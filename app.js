@@ -13,16 +13,15 @@
     { id: 'q2', title: '创建知识PK时，题目内容应优先复用哪个现有资产？', type: '单选题', options: ['企学院现有题库/试卷', '重新录入临时题目', '活动海报', '学员标签'], correct: 0 },
     { id: 'q3', title: '为了保证团队PK公平，默认更适合采用哪种方式？', type: '单选题', options: ['双方同题同顺序', '双方随机不同题', '仅比较答题速度', '管理员人工判定'], correct: 0 },
     { id: 'q4', title: 'PK结果应进入活动数据统计。', type: '判断题', options: ['正确', '错误'], correct: 0 },
-    { id: 'q5', title: '活动开始后，为保证公平应锁定哪些内容？', type: '多选题', options: ['题目内容', '题目顺序', '计分规则', '学员头像'], correct: [0, 1, 2] }
+    { id: 'q5', title: '对局开始后，为保证公平应锁定哪些内容？', type: '多选题', options: ['题目内容', '题目顺序', '计分规则', '学员头像'], correct: [0, 1, 2] }
   ];
   const fallbackActivity = {
     id: 'pk-demo-fallback', name: '产品知识组队体验赛', description: '通过实时知识对战巩固产品与服务规范。',
-    status: '进行中', mode: '1v1PK', teamSize: 3,
+    status: '可参与', storeDisplay: '显示', mode: '1v1PK', teamSize: 3,
     groupMatchMode: 'department_vs_department', participantDepartments: ['产品中心', '客户成功部'], aiFallback: true, questionCount: 5, seconds: 15, nextIntervalSeconds: 2,
     baseScore: 10, wrongScore: -2, timeBonus: true, bonusPerSecond: 1,
     sourceName: '新人产品知识试卷', learnerIds: ['u1', 'u2', 'u4', 'u7'], attempts: 5,
-    winPoints: 10, joinPoints: 2, startAt: new Date(Date.now() - 86400000).toISOString(),
-    endAt: new Date(Date.now() + 6 * 86400000).toISOString(), questionSnapshot: fallbackQuestions
+    winPoints: 10, joinPoints: 2, questionSnapshot: fallbackQuestions
   };
   const params = new URLSearchParams(location.search);
   const apiEnabled = false;
@@ -75,13 +74,7 @@
     return data;
   }
   function derivedStatus(activity) {
-    const now = Date.now(), start = new Date(activity.startAt).getTime(), end = new Date(activity.endAt).getTime();
-    if (activity.manualEndedAt || activity.status === '已结束') return '已结束';
-    if (Number.isFinite(end) && now >= end) return '已结束';
-    if (!(activity.questionSnapshot?.length || activity.questionCount > 0)) return '未开始';
-    if (activity.manualStartedAt) return '进行中';
-    if (Number.isFinite(start) && now < start) return '未开始';
-    return '进行中';
+    return activity?.storeDisplay === '隐藏' ? '已隐藏' : '可参与';
   }
   function normalizeQuestion(question, index) {
     const fallback = fallbackQuestions[index % fallbackQuestions.length];
@@ -92,8 +85,9 @@
     };
   }
   function normalizeActivity(activity) {
+    const merged = { ...fallbackActivity, ...activity };
     const normalized = {
-      ...fallbackActivity, ...activity, status: derivedStatus(activity),
+      ...merged, status: derivedStatus(merged),
       teamSize: Number(activity.teamSize || 3),
       questionCount: Number(activity.questionCount ?? 5), seconds: Number(activity.seconds || 15),
       nextIntervalSeconds: Math.min(10, Math.max(1, Number(activity.nextIntervalSeconds || 2))),
@@ -108,35 +102,13 @@
     }
     return normalized;
   }
-  function formatDateTime(value) {
-    if (!value) return '未设置';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value).replace('T', ' ');
-    return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).replaceAll('/', '-');
-  }
-  function remainingText(activity) {
-    const seconds = Math.max(0, Math.floor((new Date(activity.endAt).getTime() - Date.now()) / 1000));
-    const days = Math.floor(seconds / 86400), hours = Math.floor(seconds % 86400 / 3600), minutes = Math.floor(seconds % 3600 / 60);
-    return days > 0 ? `${days}天${hours}小时` : `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-  }
   function eligibility(activity) {
     return !activity.learnerIds?.length || activity.learnerIds.includes(currentUser.id);
   }
   function visibleInLearnerSide(activity) {
-    if (['已下架', '暂不上架'].includes(activity.shelfStatus)) return false;
-    if (activity.storeDisplay === '隐藏') return false;
-    if (activity.shelfStatus === '定时上架' && activity.shelfAt) return Date.now() >= new Date(activity.shelfAt).getTime();
-    return true;
+    return activity?.storeDisplay !== '隐藏';
   }
   const dataFingerprint = value => JSON.stringify(value);
-  function updateRemainingLabels() {
-    document.querySelectorAll('[data-remaining-id]').forEach(target => {
-      const activity = state.activities.find(item => item.id === target.dataset.remainingId);
-      if (activity) target.textContent = remainingText(activity);
-    });
-    const detail = document.querySelector('[data-detail-remaining]');
-    if (detail && state.activity) detail.textContent = remainingText(state.activity);
-  }
   async function loadActivities({ preserve = true, forceRender = false } = {}) {
     const previousFingerprint = dataFingerprint(state.activities);
     let rows = [];
@@ -147,17 +119,19 @@
     if (!rows.length) {
       try { const local = JSON.parse(localStorage.getItem('xiaoe-pk-demo-v3') || 'null'); if (local) rows = [local]; } catch {}
     }
-    const nextActivities = (rows.length ? rows : [fallbackActivity]).map(normalizeActivity).filter(visibleInLearnerSide);
+    const nextActivities = (rows.length ? rows : [fallbackActivity])
+      .map(normalizeActivity)
+      .filter(item => visibleInLearnerSide(item) && eligibility(item));
     const changed = previousFingerprint !== dataFingerprint(nextActivities);
     state.activities = nextActivities;
     const requested = params.get('activity');
     const currentId = preserve ? state.activity?.id : null;
     if (requested || currentId) state.activity = state.activities.find(item => item.id === (requested || currentId)) || null;
     if (requested && state.activity) state.stage = hasEnteredActivity(state.activity.id) ? Stage.DETAIL : Stage.INTRO;
+    if (requested && !state.activity) state.stage = Stage.LIST;
     if (state.activity) setActivity(state.activity);
     const shouldRender = forceRender || changed || !app.firstElementChild;
     if (shouldRender) { clearTimers(); render(); }
-    else updateRemainingLabels();
     return shouldRender;
   }
   function setActivity(activity) {
@@ -219,23 +193,26 @@
   }
   function activityCard(activity, index) {
     const status = derivedStatus(activity), mode = activity.mode === '组队PK' ? `${activity.teamSize}人/队` : '1v1PK';
-    return `<article class="activity-card card" style="animation-delay:${index * 45}ms" data-activity="${escapeHtml(activity.id)}"><div class="pk-cover"><img src="${activity.cover || visualAssets.shield}" alt=""></div><div class="activity-main"><div class="activity-name"><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span><b>${escapeHtml(activity.name)}</b></div><div class="activity-meta">${mode} · 共${activity.questionCount}道题 · ${activity.seconds}秒/题</div><div class="countdown-text">${status === '进行中' ? `<span class="clock-mark"></span><span>剩余</span><b data-remaining-id="${escapeHtml(activity.id)}">${remainingText(activity)}</b><span>结束</span>` : `<span>${status === '未开始' ? formatDateTime(activity.startAt) + ' 开始' : formatDateTime(activity.endAt) + ' 结束'}</span>`}</div></div><span class="activity-arrow">›</span></article>`;
+    return `<article class="activity-card card" style="animation-delay:${index * 45}ms" data-activity="${escapeHtml(activity.id)}"><div class="pk-cover"><img src="${activity.cover || visualAssets.shield}" alt=""></div><div class="activity-main"><div class="activity-name"><span class="status">${status}</span><b>${escapeHtml(activity.name)}</b></div><div class="activity-meta">${mode} · 共${activity.questionCount}道题 · 每题${activity.seconds}秒</div><div class="countdown-text"><span class="clock-mark"></span><span>已向本场参赛学员开放</span></div></div><span class="activity-arrow">›</span></article>`;
   }
   function filteredActivities() {
-    return state.activities.filter(item => (state.activeTab === '全部' || derivedStatus(item) === state.activeTab) && (!state.search || item.name.includes(state.search)));
+    return state.activities.filter(item => (state.activeTab === '全部' || item.mode === state.activeTab) && (!state.search || item.name.includes(state.search)));
   }
   function renderActivityRows() {
     const rows = filteredActivities();
     return rows.length ? `${rows.map(activityCard).join('')}<div class="mode-promo"><div><b>1v1PK，实时知识对战</b><span>创建房间 · 邀请同事 · 独立答题</span><em>组队PK 后续开放</em></div><img src="${avatarAssets.mascot}" alt=""></div><div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>没有更多活动了</span></div>` : `<div class="empty-state"><img src="${visualAssets.empty}" alt=""><span>该分类暂无PK赛</span></div>`;
   }
   function renderList() {
-    const tabs = ['全部', '进行中', '未开始', '已结束'];
+    const tabs = ['全部', '1v1PK', '组队PK'];
     return `<section class="stage no-footer list-stage" data-stage="LIST">${header('PK赛', false)}<label class="search"><input id="activitySearch" value="${escapeHtml(state.search)}" placeholder="搜索活动名称" aria-label="搜索活动名称"></label><nav class="tabs">${tabs.map(tab => `<button class="${state.activeTab === tab ? 'active' : ''}" data-tab="${tab}">${tab}</button>`).join('')}<i class="tab-indicator" style="transform:translateX(${tabs.indexOf(state.activeTab) * 100}%)"></i></nav><div class="activity-list">${renderActivityRows()}</div><nav class="pk-bottom-nav"><button data-home><i>⌂</i>首页</button><button><i>▣</i>学习</button><button class="active"><i>PK</i>PK赛</button><button><i>♙</i>我的</button></nav></section>`;
   }
   function renderIntro() {
     const a = state.activity, status = derivedStatus(a);
     const groupDisabled = a.mode === '组队PK';
-    return `<section class="stage intro-stage" data-stage="INTRO">${header('PK赛介绍')}<div class="intro-hero"><img src="${a.cover || visualAssets.shield}" alt=""><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span><div><small>1V1 知识对战</small><h2>${escapeHtml(a.name)}</h2><p>${escapeHtml(a.description || '与同事实时对战，在比拼中巩固知识。')}</p></div></div><div class="intro-stats card"><div><b>${a.questionCount}</b><span>对战题数</span></div><div><b>${a.seconds}s</b><span>每题答题时间</span></div><div><b>${a.attempts}</b><span>每日挑战次数</span></div></div><h3 class="section-title">PK赛说明</h3><div class="intro-rules card"><p><i>1</i>双方独立完成同一道题，一方先提交不会影响另一方作答。</p><p><i>2</i>双方都提交或答题时间结束后，统一展示本题结果。</p><p><i>3</i>答题正确且用时更短，可获得更高分数。</p></div><div class="intro-time card"><span>活动时间</span><b>${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</b></div>${groupDisabled ? '<div class="phase-note">组队PK将在后续版本开放，本期仅支持1v1PK。</div>' : ''}${footer(`<button class="btn primary" data-enter-activity ${groupDisabled ? 'disabled' : ''}>${groupDisabled ? '组队PK 敬请期待' : '进入PK赛'}</button>`)}</section>`;
+    const allowed = eligibility(a), configured = a.questionSnapshot?.length > 0 && a.questionCount > 0;
+    const disabled = groupDisabled || !allowed || !configured;
+    const action = groupDisabled ? '组队PK 敬请期待' : !allowed ? '不在本场参赛范围' : !configured ? 'PK赛尚未配置题目' : '进入PK赛';
+    return `<section class="stage intro-stage" data-stage="INTRO">${header('PK赛介绍')}<div class="intro-hero"><img src="${a.cover || visualAssets.shield}" alt=""><span class="status">${status}</span><div><small>1V1 知识对战</small><h2>${escapeHtml(a.name)}</h2><p>${escapeHtml(a.description || '与同事实时对战，在比拼中巩固知识。')}</p></div></div><div class="intro-stats card"><div><b>${a.questionCount}</b><span>对战题数</span></div><div><b>${a.seconds}s</b><span>每题答题时间</span></div><div><b>${a.attempts}</b><span>每日挑战次数</span></div></div><h3 class="section-title">PK赛说明</h3><div class="intro-rules card"><p><i>1</i>双方独立完成同一道题，一方先提交不会影响另一方作答。</p><p><i>2</i>双方都提交或答题时间结束后，统一展示本题结果。</p><p><i>3</i>答题正确且用时更短，可获得更高分数。</p></div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${groupDisabled ? '<div class="phase-note">组队PK将在后续版本开放，本期仅支持1v1PK。</div>' : ''}${footer(`<button class="btn primary" data-enter-activity ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
   }
   function roomPerson(person, fallback = '等待对手') {
     if (!person) return `<div class="room-person empty"><span>＋</span><b>${fallback}</b></div>`;
@@ -276,9 +253,9 @@
   function renderDetail() {
     const a = state.activity, status = derivedStatus(a), allowed = eligibility(a), mode = a.mode === '组队PK' ? `${a.teamSize}人/队` : '1v1PK';
     const configured = a.questionCount > 0;
-    const disabled = status !== '进行中' || !allowed || !configured || a.mode === '组队PK';
-    const action = !configured ? '活动尚未配置题目' : !allowed ? '不在本场参赛范围' : status === '未开始' ? '活动未开始' : status === '已结束' ? '活动已结束' : a.mode === '组队PK' ? '组队PK 敬请期待' : '开始匹配';
-    return `<section class="stage detail-stage" data-stage="DETAIL">${header('活动详情', true, true)}<div class="detail-summary card"><div class="pk-cover"><img src="${a.cover || visualAssets.shield}" alt=""></div><div><div class="detail-name"><b>${escapeHtml(a.name)}</b><span class="status ${status === '已结束' ? 'red' : ''}">${status}</span></div><h2>${mode} · 共${a.questionCount}道题 · ${a.seconds}秒/题</h2><p>${status === '进行中' ? `剩余 <strong data-detail-remaining>${remainingText(a)}</strong> 结束` : `${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}`}</p></div></div><h3 class="section-title">活动规则</h3><div class="rule-panel card">${ruleRows(a).map(([icon, title, text]) => `<div class="rule-line"><span class="rule-icon ${icon}"></span><div><b>${title}</b><p>${escapeHtml(text)}</p></div></div>`).join('')}</div><h3 class="section-title">活动时间</h3><div class="time-box card">${formatDateTime(a.startAt)} 至 ${formatDateTime(a.endAt)}</div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${footer(`<span class="customer-service">联系客服</span><button class="btn primary" data-start ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
+    const disabled = !allowed || !configured || a.mode === '组队PK';
+    const action = !configured ? 'PK赛尚未配置题目' : !allowed ? '不在本场参赛范围' : a.mode === '组队PK' ? '组队PK 敬请期待' : '开始匹配';
+    return `<section class="stage detail-stage" data-stage="DETAIL">${header('PK赛详情', true, true)}<div class="detail-summary card"><div class="pk-cover"><img src="${a.cover || visualAssets.shield}" alt=""></div><div><div class="detail-name"><b>${escapeHtml(a.name)}</b><span class="status">${status}</span></div><h2>${mode} · 共${a.questionCount}道题 · 每题答题时间${a.seconds}秒</h2><p>已向本场参赛学员开放，可随时发起对战</p></div></div><h3 class="section-title">PK赛规则</h3><div class="rule-panel card">${ruleRows(a).map(([icon, title, text]) => `<div class="rule-line"><span class="rule-icon ${icon}"></span><div><b>${title}</b><p>${escapeHtml(text)}</p></div></div>`).join('')}</div>${!allowed ? '<div class="eligibility-note">当前账号不在本场参赛范围，请联系管理员。</div>' : ''}${footer(`<span class="customer-service">联系客服</span><button class="btn primary" data-start ${disabled ? 'disabled' : ''}>${action}</button>`)}</section>`;
   }
   function renderMatching() {
     const opponent = state.match?.opponent;
@@ -613,16 +590,20 @@
         try {
           const data = await api(`/api/activities/${state.activity.id}`);
           const next = normalizeActivity(data.activity);
-          if (dataFingerprint(next) !== dataFingerprint(state.activity)) {
+          if (!visibleInLearnerSide(next) || !eligibility(next)) {
+            clearTimers(); state.activity = null; state.stage = Stage.LIST;
+            await loadActivities({ preserve: false, forceRender: true }); rendered = true;
+          } else if (dataFingerprint(next) !== dataFingerprint(state.activity)) {
             clearTimers(); setActivity(next); render(); rendered = true;
-          } else updateRemainingLabels();
+          }
         } catch {}
       }
       if (!rendered && state.stage === refreshStage && (state.stage === Stage.LIST || state.stage === Stage.DETAIL)) startStatusRefresh();
     }, 5000);
   }
   function startMatchFlow() {
-    if (derivedStatus(state.activity) !== '进行中' || !eligibility(state.activity)) return;
+    if (!state.activity || !visibleInLearnerSide(state.activity) || !eligibility(state.activity)) return;
+    if (!(state.activity.questionSnapshot?.length || state.activity.questionCount > 0)) return;
     if (state.activity.mode === '组队PK') return;
     loadRooms(); setStage(Stage.ROOMS);
   }

@@ -1,8 +1,6 @@
 (() => {
   const KEY='xiaoe-pk-demo-v3';
   const now=new Date(),isoLocal=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)};
-  const startDefault=isoLocal(new Date(now.getTime()+24*60*60*1000));
-  const endDefault=isoLocal(new Date(now.getTime()+8*24*60*60*1000));
   const covers=[
     {id:'cover-1',name:'蓝色PK主题',url:'assets/pk-c-visuals/pk-shield.png'},
     {id:'cover-2',name:'荣誉挑战主题',url:'assets/pk-c-visuals/trophy.png'},
@@ -14,7 +12,7 @@
     {id:'q3',title:'组队PK中，每题以本队最快提交者的答案为准。',type:'判断题',difficulty:'简单',options:['正确','错误'],correct:0},
     {id:'q4',title:'双方都答对时，如何计算速度加分？',type:'单选题',difficulty:'适中',options:['按剩余时间','按双方用时差','固定加5分','不加分'],correct:1},
     {id:'q5',title:'PK数据分析应包含哪些指标？',type:'多选题',difficulty:'适中',options:['参与人数','胜负场次','题目正确率','学员积分'],correct:[0,1,2,3]},
-    {id:'q6',title:'活动超过结束时间后，学员端展示为已结束。',type:'判断题',difficulty:'简单',options:['正确','错误'],correct:0}
+    {id:'q6',title:'管理员隐藏PK赛后，学员端不再展示该PK赛。',type:'判断题',difficulty:'简单',options:['正确','错误'],correct:0}
   ];
   const papers=[
     {id:'p1',name:'新人产品知识试卷',count:5,total:50,random:'关闭',questionIds:['q1','q2','q3','q4','q5']},
@@ -32,42 +30,33 @@
   const defaultActivity=()=>({
     id:'pk-'+Date.now(),name:'',cover:'',description:'',mode:'1v1PK',teamSize:3,aiFallback:false,
     questionCount:0,seconds:15,nextIntervalSeconds:2,baseScore:10,wrongScore:-2,timeBonus:true,bonusPerSecond:1,
-    attempts:5,winPoints:10,joinPoints:2,startAt:startDefault,endAt:endDefault,sourceType:'',sourceId:'',sourceName:'',sourceIds:[],questionSnapshot:[],
-    shelfStatus:'立即上架',shelfAt:startDefault,timedUnpublish:false,unpublishAt:endDefault,storeDisplay:'显示',visibility:'全部学员',learnerIds:learners.map(x=>x.id),participantDepartments:['产品中心','客户成功部','销售中心'],
-    status:'未开始',manager:'管理员',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-'),updatedAt:'',setupComplete:false
+    attempts:5,winPoints:10,joinPoints:2,sourceType:'',sourceId:'',sourceName:'',sourceIds:[],questionSnapshot:[],
+    storeDisplay:'显示',visibility:'全部学员',learnerIds:learners.map(x=>x.id),participantDepartments:['产品中心','客户成功部','销售中心'],
+    status:'可参与',manager:'管理员',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-'),updatedAt:'',setupComplete:false
   });
   const demoRows=[
-    {...defaultActivity(),id:'demo-new',name:'新员工产品知识PK赛',cover:covers[0].url,mode:'1v1PK',questionCount:5,sourceName:'新人产品知识试卷',questionSnapshot:questions.slice(0,5),status:'未开始',shelfStatus:'已上架',participants:86,createdAt:'2026-08-08 14:10:00'},
-    {...defaultActivity(),id:'demo-active',name:'产品知识部门挑战赛',cover:covers[1].url,mode:'组队PK',questionCount:5,sourceName:'企学院功能认知卷',questionSnapshot:questions.slice(0,5),status:'进行中',shelfStatus:'已上架',startAt:isoLocal(new Date(now.getTime()-24*60*60*1000)),endAt:isoLocal(new Date(now.getTime()+6*24*60*60*1000)),participants:120,createdAt:'2026-07-10 16:30:00'},
-    {...defaultActivity(),id:'demo-ended',name:'信息安全挑战赛',cover:covers[2].url,mode:'1v1PK',questionCount:4,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,4),status:'已结束',shelfStatus:'已下架',participants:72,createdAt:'2026-07-01 09:20:00'}
+    {...defaultActivity(),id:'demo-new',name:'新员工产品知识PK赛',cover:covers[0].url,mode:'1v1PK',questionCount:5,sourceName:'新人产品知识试卷',questionSnapshot:questions.slice(0,5),participants:86,createdAt:'2026-08-08 14:10:00'},
+    {...defaultActivity(),id:'demo-active',name:'产品知识部门挑战赛',cover:covers[1].url,mode:'组队PK',questionCount:5,sourceName:'企学院功能认知卷',questionSnapshot:questions.slice(0,5),participants:120,createdAt:'2026-07-10 16:30:00'},
+    {...defaultActivity(),id:'demo-hidden',name:'信息安全挑战赛',cover:covers[2].url,mode:'1v1PK',questionCount:4,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,4),storeDisplay:'隐藏',status:'已隐藏',participants:72,createdAt:'2026-07-01 09:20:00'}
   ];
   const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),userSearch:'',userDepartment:'全部',userParticipation:'全部'};
   const app=document.querySelector('#app'),breadcrumb=document.querySelector('#breadcrumb'),modalRoot=document.querySelector('#modalRoot'),toastEl=document.querySelector('#toast');
   const escapeHtml=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}};
-  const derivedStatus=activity=>{
-    const now=Date.now(),start=new Date(activity.startAt).getTime(),end=new Date(activity.endAt).getTime();
-    if(activity.manualEndedAt||activity.status==='已结束')return '已结束';
-    if(Number.isFinite(end)&&now>=end)return '已结束';
-    if(!(activity.questionSnapshot?.length||activity.questionCount>0))return '未开始';
-    if(activity.manualStartedAt)return '进行中';
-    if(Number.isFinite(start)&&now<start)return '未开始';
-    return '进行中';
-  };
-  const saveActivity=a=>{a.status=derivedStatus(a);a.updatedAt=new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-');localStorage.setItem(KEY,JSON.stringify(a));try{new BroadcastChannel('xiaoe-pk-demo').postMessage(a)}catch{};window.parent?.postMessage({type:'PK_CONFIG_UPDATED',config:a},'*')};
+  const derivedStatus=activity=>activity.storeDisplay==='隐藏'?'已隐藏':'可参与';
+  const saveActivity=a=>{delete a.startAt;delete a.endAt;delete a.shelfAt;delete a.unpublishAt;delete a.timedUnpublish;delete a.shelfStatus;a.status=derivedStatus(a);a.updatedAt=new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-');localStorage.setItem(KEY,JSON.stringify(a));try{new BroadcastChannel('xiaoe-pk-demo').postMessage(a)}catch{};window.parent?.postMessage({type:'PK_CONFIG_UPDATED',config:a},'*')};
   const getRows=()=>{const saved=getSaved(),rows=saved?[saved,...demoRows.filter(x=>x.id!==saved.id)]:demoRows;return rows.map(x=>({...x,status:derivedStatus(x)}))};
   const toast=text=>{toastEl.textContent=text;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),1800)};
   const setBreadcrumb=text=>breadcrumb.textContent=text;
-  const statusDot=s=>s==='进行中'?'green':s==='未开始'?'blue':'';
-  const shelfDot=s=>s==='已上架'||s==='立即上架'?'green':'orange';
+  const statusDot=s=>s==='可参与'?'green':'orange';
 
   function render(){modalRoot.innerHTML='';if(state.view==='list')renderList();else if(state.view==='create')renderCreate();else renderDetail()}
   function renderList(){
     setBreadcrumb('PK赛');
     const rows=getRows().filter(x=>(!state.filters.name||x.name.includes(state.filters.name))&&(state.filters.status==='全部'||x.status===state.filters.status)&&(!state.filters.manager||(x.manager||'管理员').includes(state.filters.manager)));
     app.innerHTML=`<section class="page page-pad"><div class="toolbar"><button class="btn primary" data-create>新建PK赛</button><button class="btn" data-bank>题库</button><button class="btn text">PK赛使用教程</button><span class="spacer"></span></div>
-      <div class="filter-panel"><label class="field-inline"><span>PK赛名称</span><input id="filterName" placeholder="请输入名称" value="${escapeHtml(state.filters.name)}"></label><label class="field-inline small"><span>活动状态</span><select id="filterStatus">${['全部','未开始','进行中','已结束'].map(x=>`<option ${x===state.filters.status?'selected':''}>${x}</option>`).join('')}</select></label><label class="field-inline"><span>管理老师</span><input id="filterManager" placeholder="请输入姓名" value="${escapeHtml(state.filters.manager)}"></label><button class="btn primary" data-filter>筛选</button><button class="btn text" data-reset>重置筛选条件</button></div>
-      <table class="data-table"><thead><tr><th>PK赛名称</th><th>PK类型</th><th>题目数</th><th>参与人数</th><th>创建时间</th><th>上架状态</th><th>活动状态</th><th>操作</th></tr></thead><tbody>${rows.map(rowHtml).join('')||'<tr><td colspan="8" style="text-align:center;height:220px;color:#9aa1aa">暂无符合条件的PK赛</td></tr>'}</tbody></table><div class="pagination"><span>共${rows.length}条，每页10条</span><button class="active">1</button></div></section>`;
+      <div class="filter-panel"><label class="field-inline"><span>PK赛名称</span><input id="filterName" placeholder="请输入名称" value="${escapeHtml(state.filters.name)}"></label><label class="field-inline small"><span>显示状态</span><select id="filterStatus">${['全部','可参与','已隐藏'].map(x=>`<option ${x===state.filters.status?'selected':''}>${x}</option>`).join('')}</select></label><label class="field-inline"><span>管理老师</span><input id="filterManager" placeholder="请输入姓名" value="${escapeHtml(state.filters.manager)}"></label><button class="btn primary" data-filter>筛选</button><button class="btn text" data-reset>重置筛选条件</button></div>
+      <table class="data-table"><thead><tr><th>PK赛名称</th><th>PK类型</th><th>题目数</th><th>参与人数</th><th>创建时间</th><th>显示状态</th><th>操作</th></tr></thead><tbody>${rows.map(rowHtml).join('')||'<tr><td colspan="7" style="text-align:center;height:220px;color:#9aa1aa">暂无符合条件的PK赛</td></tr>'}</tbody></table><div class="pagination"><span>共${rows.length}条，每页10条</span><button class="active">1</button></div></section>`;
     app.querySelector('[data-create]').onclick=()=>{state.current=defaultActivity();state.selectedCover='';state.view='create';render()};
     app.querySelector('[data-bank]').onclick=()=>toast('题库沿用企学院现有题库，本Demo在题目设置中演示引用');
     app.querySelector('[data-filter]').onclick=()=>{state.filters={name:document.querySelector('#filterName').value.trim(),status:document.querySelector('#filterStatus').value,manager:document.querySelector('#filterManager').value.trim()};render()};
@@ -75,18 +64,16 @@
     bindListActions();
   }
   function rowHtml(item){
-    const primary=item.status==='未开始'?'管理':'查看';
-    return `<tr><td><div class="name-cell"><img class="cover-thumb" src="${item.cover||covers[0].url}" alt=""><div><button class="link" data-manage="${item.id}"><b>${escapeHtml(item.name)}</b></button><div class="subline">管理老师：${escapeHtml(item.manager||'管理员')}</div></div></div></td><td>${item.mode}</td><td>${item.questionCount||0}</td><td>${item.participants??item.learnerIds?.length??0}</td><td>${escapeHtml(item.createdAt||'--')}</td><td><span class="dot ${shelfDot(item.shelfStatus)}"></span>${item.shelfStatus==='立即上架'?'已上架':item.shelfStatus}</td><td><span class="dot ${statusDot(item.status)}"></span>${item.status}</td><td><div class="row-actions"><button class="btn text" data-manage="${item.id}">${primary}</button><button class="btn text" data-share="${item.id}">分享</button><button class="btn text" data-data="${item.id}" ${item.status==='未开始'?'disabled':''}>数据</button><span class="more-wrap"><button class="btn text" data-more="${item.id}">更多⌄</button>${state.moreId===item.id?`<span class="more-menu"><button data-copy="${item.id}">复制</button><button data-shelf="${item.id}">${item.shelfStatus==='已下架'?'上架':'下架'}</button>${item.status==='进行中'?'<button data-end="'+item.id+'">结束</button>':'<button data-delete="'+item.id+'">删除</button>'}</span>`:''}</span></div></td></tr>`
+    return `<tr><td><div class="name-cell"><img class="cover-thumb" src="${item.cover||covers[0].url}" alt=""><div><button class="link" data-manage="${item.id}"><b>${escapeHtml(item.name)}</b></button><div class="subline">管理老师：${escapeHtml(item.manager||'管理员')}</div></div></div></td><td>${item.mode}</td><td>${item.questionCount||0}</td><td>${item.participants??item.learnerIds?.length??0}</td><td>${escapeHtml(item.createdAt||'--')}</td><td><span class="dot ${statusDot(item.status)}"></span>${item.status}</td><td><div class="row-actions"><button class="btn text" data-manage="${item.id}">管理</button><button class="btn text" data-share="${item.id}">分享</button><button class="btn text" data-data="${item.id}">数据</button><span class="more-wrap"><button class="btn text" data-more="${item.id}">更多⌄</button>${state.moreId===item.id?`<span class="more-menu"><button data-copy="${item.id}">复制</button><button data-visibility="${item.id}">${item.storeDisplay==='隐藏'?'显示':'隐藏'}</button><button data-delete="${item.id}">删除</button></span>`:''}</span></div></td></tr>`
   }
   function bindListActions(){
     app.querySelectorAll('[data-manage]').forEach(b=>b.onclick=()=>openDetail(b.dataset.manage,'questions'));
     app.querySelectorAll('[data-data]').forEach(b=>b.onclick=()=>{if(!b.disabled)openDetail(b.dataset.data,'data')});
     app.querySelectorAll('[data-share]').forEach(b=>b.onclick=()=>openShare(findActivity(b.dataset.share)));
     app.querySelectorAll('[data-more]').forEach(b=>b.onclick=e=>{e.stopPropagation();state.moreId=state.moreId===b.dataset.more?null:b.dataset.more;renderList()});
-    app.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.copy);state.current={...item,id:'pk-'+Date.now(),name:item.name+'（副本）',status:'未开始',manualStartedAt:null,manualEndedAt:null,shelfStatus:'暂不上架',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-')};state.view='create';render()});
-    app.querySelectorAll('[data-shelf]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.shelf);item.shelfStatus=item.shelfStatus==='已下架'?'已上架':'已下架';saveActivity(item);state.moreId=null;render()});
-    app.querySelectorAll('[data-end]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.end);item.status='已结束';item.manualEndedAt=new Date().toISOString();saveActivity(item);state.moreId=null;render()});
-    app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.delete);if(getSaved()?.id===item.id)localStorage.removeItem(KEY);state.moreId=null;toast('PK赛已删除');render()});
+    app.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.copy);state.current={...item,id:'pk-'+Date.now(),name:item.name+'（副本）',storeDisplay:'显示',status:'可参与',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-')};state.view='create';render()});
+    app.querySelectorAll('[data-visibility]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.visibility);item.storeDisplay=item.storeDisplay==='隐藏'?'显示':'隐藏';saveActivity(item);state.moreId=null;toast(item.storeDisplay==='隐藏'?'PK赛已隐藏，学员端不再展示':'PK赛已显示，参赛学员可直接进入');render()});
+    app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.delete);if(!confirm(`确认删除“${item.name}”吗？删除后不可恢复。`))return;if(getSaved()?.id===item.id)localStorage.removeItem(KEY);state.moreId=null;toast('PK赛已删除');render()});
   }
   function findActivity(id){return getRows().find(x=>x.id===id)||getRows()[0]}
 
@@ -104,7 +91,7 @@
       if(!name){const input=document.querySelector('#name');input.classList.add('error');input.parentElement.querySelector('.error-text').textContent='请输入PK赛名称';missing.push(input)}
       if(!cover){const box=document.querySelector('.cover-box');box.classList.add('error');document.querySelector('#coverError').textContent='请选择PK赛封面';missing.push(box)}
       if(missing.length){missing[0].scrollIntoView({behavior:'smooth',block:'center'});missing[0].focus?.();return}
-      collectEditable(a);a.name=name;a.cover=cover;a.setupComplete=false;a.status='未开始';saveActivity(a);toast('PK赛已创建，请继续添加题目');state.view='detail';state.detailTab='questions';state.current=a;setTimeout(render,300)
+      collectEditable(a);a.name=name;a.cover=cover;a.setupComplete=false;a.status='可参与';saveActivity(a);toast('PK赛已创建，请继续添加题目');state.view='detail';state.detailTab='questions';state.current=a;setTimeout(render,300)
     };
   }
   function basicInfoForm(a,creating=false){
@@ -115,7 +102,6 @@
   function pkQuickSettings(a){
     return `<div class="form-row"><label class="form-label">PK类型</label><div class="radio-row"><label><input type="radio" name="mode" value="1v1PK" ${a.mode!=='组队PK'?'checked':''}>1v1PK</label><label><input type="radio" name="mode" value="组队PK" ${a.mode==='组队PK'?'checked':''}>组队PK</label></div></div>
       <div class="form-row ${a.mode==='组队PK'?'':'hidden'}" id="teamSizeRow"><label class="form-label">每队人数</label><div class="unit-field"><input class="input" id="teamSize" type="number" min="2" max="10" value="${a.teamSize||3}"><span>人/队</span></div></div>
-      <div class="form-row"><label class="form-label">活动时间</label><div class="two-fields"><input class="input" id="startAt" type="datetime-local" value="${a.startAt||startDefault}"><span>至</span><input class="input" id="endAt" type="datetime-local" value="${a.endAt||endDefault}"></div></div>
       <div class="form-row"><label class="form-label">答题设置</label><div class="two-fields"><span>每题答题时间</span><div class="unit-field"><input class="input" id="seconds" type="number" min="5" max="120" value="${a.seconds||15}"><span>秒</span></div><span>题间停留时间</span><div class="unit-field"><input class="input" id="nextIntervalSeconds" type="number" min="1" max="10" value="${a.nextIntervalSeconds||2}"><span>秒</span></div></div></div>
       <div class="form-row"><label class="form-label">计分规则</label><div class="two-fields"><span>答对</span><div class="unit-field"><input class="input" id="baseScore" type="number" min="1" value="${a.baseScore||10}"><span>分</span></div><span>答错或未作答</span><div class="unit-field"><input class="input" id="wrongScore" type="number" max="0" value="${a.wrongScore??-2}"><span>分</span></div></div></div>
       <div class="form-row"><label class="form-label">速度加分</label><div><label class="toggle"><input type="checkbox" id="timeBonus" ${a.timeBonus!==false?'checked':''}><span>双方都答对时，更快的一方按双方答题用时差加分</span></label><div class="unit-field" style="margin-top:10px"><span>每快1秒加</span><input class="input" id="bonusPerSecond" type="number" min="1" value="${a.bonusPerSecond||1}"><span>分</span></div></div></div>
@@ -125,24 +111,20 @@
       <div class="form-row"><label class="form-label">参赛范围</label><div><div class="radio-row"><label><input type="radio" name="visibility" value="全部学员" ${a.visibility!=='部分学员'?'checked':''}>全部学员</label><label><input type="radio" name="visibility" value="部分学员" ${a.visibility==='部分学员'?'checked':''}>部分学员</label></div><div class="sub-panel ${a.visibility==='部分学员'?'':'hidden'}" id="learnerScopePanel"><button class="btn" data-select-learners>＋ 选择学员</button><span class="help" style="margin-left:12px">已选择 ${a.learnerIds?.length||0} 人</span></div><div class="help">设置哪些学员可以参加本场PK赛</div></div></div>`
   }
   function publishSettings(a){
-    const shelf=a.shelfStatus==='已上架'?'立即上架':a.shelfStatus||'立即上架';
-    return `<div class="form-row"><label class="form-label">上架设置</label><div><div class="radio-row">${['立即上架','定时上架','暂不上架'].map(x=>`<label><input type="radio" name="shelfStatus" value="${x}" ${shelf===x?'checked':''}>${x}</label>`).join('')}</div><div class="sub-panel ${shelf==='暂不上架'?'hidden':''}" id="schedulePanel"><div class="unit-field ${shelf==='定时上架'?'':'hidden'}" id="shelfTimeRow"><span class="required">上架时间</span><input class="input" type="datetime-local" id="shelfAt" value="${a.shelfAt||startDefault}"></div><div class="sub-title">更多设置</div><label class="check-row"><input type="checkbox" id="timedUnpublish" ${a.timedUnpublish?'checked':''}>定时下架</label><div class="unit-field ${a.timedUnpublish?'':'hidden'}" id="unpublishTimeRow"><span>下架时间</span><input class="input" type="datetime-local" id="unpublishAt" value="${a.unpublishAt||endDefault}"></div></div></div></div>
-      <div class="form-row"><label class="form-label">在店铺内显示</label><div class="radio-row"><label><input type="radio" name="storeDisplay" value="显示" ${a.storeDisplay!=='隐藏'?'checked':''}>显示</label><label><input type="radio" name="storeDisplay" value="隐藏" ${a.storeDisplay==='隐藏'?'checked':''}>隐藏</label></div></div>`
+    return `<div class="form-row"><label class="form-label">在店铺内显示</label><div><div class="radio-row"><label><input type="radio" name="storeDisplay" value="显示" ${a.storeDisplay!=='隐藏'?'checked':''}>显示</label><label><input type="radio" name="storeDisplay" value="隐藏" ${a.storeDisplay==='隐藏'?'checked':''}>隐藏</label></div><div class="help">隐藏后，学员端不再展示该PK赛，通过原链接也无法进入；再次设置为显示即可恢复参与。</div></div></div>`
   }
   function bindEditableFields(a){
     document.querySelector('#name')?.addEventListener('input',e=>{if(e.target.value.trim()){e.target.classList.remove('error');e.target.parentElement.querySelector('.error-text').textContent=''}});
     document.querySelectorAll('input[name="mode"]').forEach(x=>x.onchange=()=>document.querySelector('#teamSizeRow')?.classList.toggle('hidden',x.value!=='组队PK'));
-    document.querySelectorAll('input[name="shelfStatus"]').forEach(x=>x.onchange=()=>{document.querySelector('#schedulePanel')?.classList.toggle('hidden',x.value==='暂不上架');document.querySelector('#shelfTimeRow')?.classList.toggle('hidden',x.value!=='定时上架')});
-    document.querySelector('#timedUnpublish')?.addEventListener('change',e=>document.querySelector('#unpublishTimeRow')?.classList.toggle('hidden',!e.target.checked));
     document.querySelectorAll('input[name="visibility"]').forEach(x=>x.onchange=()=>document.querySelector('#learnerScopePanel')?.classList.toggle('hidden',x.value!=='部分学员'));
     document.querySelector('[data-select-learners]')?.addEventListener('click',()=>openLearnerPicker(a));
   }
   function collectEditable(a){
     const val=id=>document.querySelector(id)?.value;
     a.name=val('#name')?.trim()||a.name;a.description=document.querySelector('#description')?.textContent.trim()||a.description;a.mode=document.querySelector('input[name="mode"]:checked')?.value||a.mode;
-    a.startAt=val('#startAt')||a.startAt;a.endAt=val('#endAt')||a.endAt;a.seconds=Number(val('#seconds')||a.seconds);a.nextIntervalSeconds=Number(val('#nextIntervalSeconds')||a.nextIntervalSeconds);a.baseScore=Number(val('#baseScore')||a.baseScore);a.wrongScore=Number(val('#wrongScore')??a.wrongScore);a.timeBonus=document.querySelector('#timeBonus')?.checked??a.timeBonus;
+    a.seconds=Number(val('#seconds')||a.seconds);a.nextIntervalSeconds=Number(val('#nextIntervalSeconds')||a.nextIntervalSeconds);a.baseScore=Number(val('#baseScore')||a.baseScore);a.wrongScore=Number(val('#wrongScore')??a.wrongScore);a.timeBonus=document.querySelector('#timeBonus')?.checked??a.timeBonus;
     a.teamSize=Number(val('#teamSize')||a.teamSize);a.bonusPerSecond=Number(val('#bonusPerSecond')||a.bonusPerSecond);a.aiFallback=document.querySelector('#aiFallback')?.checked??a.aiFallback;a.attempts=Number(val('#attempts')||a.attempts);a.joinPoints=Number(val('#joinPoints')||a.joinPoints);a.winPoints=Number(val('#winPoints')||a.winPoints);
-    a.shelfStatus=document.querySelector('input[name="shelfStatus"]:checked')?.value||a.shelfStatus;a.shelfAt=val('#shelfAt')||a.shelfAt;a.timedUnpublish=document.querySelector('#timedUnpublish')?.checked??a.timedUnpublish;a.unpublishAt=val('#unpublishAt')||a.unpublishAt;a.storeDisplay=document.querySelector('input[name="storeDisplay"]:checked')?.value||a.storeDisplay;a.visibility=document.querySelector('input[name="visibility"]:checked')?.value||a.visibility;
+    a.storeDisplay=document.querySelector('input[name="storeDisplay"]:checked')?.value||a.storeDisplay;a.visibility=document.querySelector('input[name="visibility"]:checked')?.value||a.visibility;
   }
   function clearErrors(){document.querySelectorAll('.error').forEach(x=>x.classList.remove('error'));document.querySelectorAll('.error-text').forEach(x=>x.textContent='')}
   function showError(selector,text){const el=document.querySelector(selector);el.classList.add('error');el.parentElement.querySelector('.error-text').textContent=text;el.scrollIntoView({behavior:'smooth',block:'center'});el.focus()}
@@ -152,17 +134,18 @@
   }
   function renderDetail(){
     const a=state.current;setBreadcrumb(`PK赛  >  ${a.name}  >  详情`);
-    app.innerHTML=`<section class="detail-head"><img src="${a.cover||covers[0].url}" alt=""><div><h1>${escapeHtml(a.name)}</h1><div class="detail-meta"><span>题目数：${a.questionCount||0}</span><span>参与人数：${a.participants??a.learnerIds?.length??0}</span><span><i class="dot ${shelfDot(a.shelfStatus)}"></i>${a.shelfStatus==='立即上架'?'已上架':a.shelfStatus}</span><span><i class="dot ${statusDot(a.status)}"></i>${a.status}</span></div></div><div class="detail-actions"><button class="btn text" data-share-detail>分享</button><button class="btn text" data-back-list>返回列表</button></div></section>
-      <section class="detail-layout"><nav class="detail-nav">${[['basic','基本信息'],['questions','题目设置'],['publish','上架设置'],['users','用户列表'],['data','数据分析']].map(([id,label])=>`<button data-tab="${id}" class="${state.detailTab===id?'active':''}">${label}</button>`).join('')}</nav><div class="detail-content">${detailPanel(a)}</div></section>`;
+    a.status=derivedStatus(a);
+    app.innerHTML=`<section class="detail-head"><img src="${a.cover||covers[0].url}" alt=""><div><h1>${escapeHtml(a.name)}</h1><div class="detail-meta"><span>题目数：${a.questionCount||0}</span><span>参与人数：${a.participants??a.learnerIds?.length??0}</span><span><i class="dot ${statusDot(a.status)}"></i>${a.status}</span></div></div><div class="detail-actions"><button class="btn text" data-share-detail>分享</button><button class="btn text" data-back-list>返回列表</button></div></section>
+      <section class="detail-layout"><nav class="detail-nav">${[['basic','基本信息'],['questions','题目设置'],['publish','商品信息'],['users','用户列表'],['data','数据分析']].map(([id,label])=>`<button data-tab="${id}" class="${state.detailTab===id?'active':''}">${label}</button>`).join('')}</nav><div class="detail-content">${detailPanel(a)}</div></section>`;
     document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{state.detailTab=b.dataset.tab;renderDetail()});
     document.querySelector('[data-back-list]').onclick=()=>{state.view='list';render()};document.querySelector('[data-share-detail]').onclick=()=>openShare(a);
     bindDetailPanel(a);
   }
   function detailPanel(a){
-    const editable=a.status==='未开始',notice=editable?'':`<div class="notice">${a.status}的PK赛仅支持查看，不能修改活动配置。</div>`;
-    if(state.detailTab==='basic')return `<div class="panel-head"><h2>基本信息</h2></div>${notice}<div class="${editable?'':'read-only'}">${basicInfoForm(a)}<div class="setting-divider"></div><div class="panel-head"><h2>PK赛设置</h2></div>${pkQuickSettings(a)}</div>${editable?'<div class="form-footer"><button class="btn primary" data-save-detail>保存</button></div>':''}`;
-    if(state.detailTab==='questions')return `${notice}<div class="${editable?'':'read-only'}">${questionPanel(a,editable)}</div>`;
-    if(state.detailTab==='publish')return `<div class="panel-head"><h2>商品信息</h2></div>${notice}<div class="${editable?'':'read-only'}">${publishSettings(a)}</div>${editable?'<div class="form-footer"><button class="btn primary" data-save-detail>保存</button></div>':''}`;
+    const editable=true;
+    if(state.detailTab==='basic')return `<div class="panel-head"><h2>基本信息</h2></div><div>${basicInfoForm(a)}<div class="setting-divider"></div><div class="panel-head"><h2>PK赛设置</h2></div>${pkQuickSettings(a)}</div><div class="form-footer"><button class="btn primary" data-save-detail>保存</button></div>`;
+    if(state.detailTab==='questions')return `<div>${questionPanel(a,editable)}</div>`;
+    if(state.detailTab==='publish')return `<div class="panel-head"><h2>商品信息</h2></div><div>${publishSettings(a)}</div><div class="form-footer"><button class="btn primary" data-save-detail>保存</button></div>`;
     if(state.detailTab==='users')return usersPanel(a);
     return dataPanel(a)
   }
@@ -178,7 +161,7 @@
     return `<div class="filter-strip user-filters"><label>关键词：<select id="userKey"><option>姓名</option><option>账号</option><option>手机号</option></select></label><input id="userSearch" placeholder="请输入姓名、账号或手机号" value="${escapeHtml(state.userSearch)}"><label>所在部门：<select id="userDepartment"><option>全部</option>${['产品中心','客户成功部','销售中心'].map(x=>`<option ${x===dept?'selected':''}>${x}</option>`).join('')}</select></label><label>参赛状态：<select id="userParticipation">${['全部','已参赛','未参赛'].map(x=>`<option ${x===participation?'selected':''}>${x}</option>`).join('')}</select></label><button class="btn primary" data-filter-users>筛选</button><button class="btn" data-export-users>导出</button><button class="btn text" data-reset-users>重置筛选条件</button></div><div class="toolbar">${a.visibility==='部分学员'?'<button class="btn primary" data-add-users>添加学员</button>':''}<button class="btn">联系用户⌄</button><button class="btn">贴标签⌄</button><span class="spacer"></span><span>共${rows.length}条</span></div><table class="data-table"><thead><tr><th><input type="checkbox"></th><th>学员</th><th>账号绑定手机号</th><th>姓名</th><th>所在部门</th><th>参赛资格状态</th><th>参赛次数</th><th>最近参赛时间</th><th>操作</th></tr></thead><tbody>${rows.map(x=>`<tr><td><input type="checkbox"></td><td><span class="avatar"></span><button class="link">${x.account}</button></td><td>${x.phone}</td><td>${x.name}</td><td>${x.department}</td><td><span class="dot green"></span>${x.qualified?'有效':'已移出'}</td><td>${x.matches}</td><td>${x.last}</td><td><button class="btn text">联系用户</button><button class="btn text">贴标签</button><button class="btn text">${x.matches?'查看对局':'移出PK赛'}</button></td></tr>`).join('')}</tbody></table>`
   }
   function dataPanel(a){
-    const hasData=a.status!=='未开始';
+    const hasData=(a.participants||0)>0;
     const eligible=a.visibility==='部分学员'?(a.learnerIds?.length||0):(a.mode==='组队PK'?156:128);
     const actual=hasData?Math.min(a.participants||86,eligible):0,totalMatches=hasData?(a.mode==='组队PK'?96:248):0,completed=hasData?Math.max(totalMatches-3,0):0;
     const scoreRows=hasData?learners.filter(x=>x.matches>0).slice().sort((x,y)=>y.score-x.score):[];
@@ -187,22 +170,22 @@
   }
   function dataTable(a,tab,rows,hasData){
     const empty=(cols,text)=>`<tr><td colspan="${cols}" class="table-empty">${text}</td></tr>`;
-    if(tab==='score'&&state.rankMode==='team'&&a.mode==='组队PK')return `<table class="data-table"><thead><tr><th>排名</th><th>部门/队伍</th><th>参赛人数</th><th>对局数</th><th>胜场</th><th>胜率</th><th>累计得分</th><th>操作</th></tr></thead><tbody>${hasData?['产品中心','客户成功部','销售中心'].map((x,i)=>`<tr><td>${i+1}</td><td>${x}</td><td>${[31,28,27][i]}</td><td>${[89,82,77][i]}</td><td>${[52,46,40][i]}</td><td>${[58.4,56.1,51.9][i]}%</td><td>${[1280,1156,984][i]}</td><td><button class="btn text">查看对局</button></td></tr>`).join(''):empty(8,'活动开始后生成团队成绩')}</tbody></table>`;
-    if(tab==='score')return `<table class="data-table"><thead><tr><th>排名</th><th>姓名</th><th>部门</th><th>累计得分</th><th>参赛场次</th><th>胜场</th><th>胜率</th><th>正确率</th><th>平均答题用时</th><th>最近参赛时间</th><th>操作</th></tr></thead><tbody>${rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td><button class="link">${x.name}</button></td><td>${x.department}</td><td>${x.score}</td><td>${x.matches}</td><td>${x.wins}</td><td>${(x.wins/x.matches*100).toFixed(1)}%</td><td>${x.accuracy}</td><td>${x.avgTime}</td><td>${x.last}</td><td><button class="btn text">查看对局</button></td></tr>`).join(''):empty(11,'活动开始后生成成绩排名')}</tbody></table>`;
+    if(tab==='score'&&state.rankMode==='team'&&a.mode==='组队PK')return `<table class="data-table"><thead><tr><th>排名</th><th>部门/队伍</th><th>参赛人数</th><th>对局数</th><th>胜场</th><th>胜率</th><th>累计得分</th><th>操作</th></tr></thead><tbody>${hasData?['产品中心','客户成功部','销售中心'].map((x,i)=>`<tr><td>${i+1}</td><td>${x}</td><td>${[31,28,27][i]}</td><td>${[89,82,77][i]}</td><td>${[52,46,40][i]}</td><td>${[58.4,56.1,51.9][i]}%</td><td>${[1280,1156,984][i]}</td><td><button class="btn text">查看对局</button></td></tr>`).join(''):empty(8,'产生对局后生成团队成绩')}</tbody></table>`;
+    if(tab==='score')return `<table class="data-table"><thead><tr><th>排名</th><th>姓名</th><th>部门</th><th>累计得分</th><th>参赛场次</th><th>胜场</th><th>胜率</th><th>正确率</th><th>平均答题用时</th><th>最近参赛时间</th><th>操作</th></tr></thead><tbody>${rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td><button class="link">${x.name}</button></td><td>${x.department}</td><td>${x.score}</td><td>${x.matches}</td><td>${x.wins}</td><td>${(x.wins/x.matches*100).toFixed(1)}%</td><td>${x.accuracy}</td><td>${x.avgTime}</td><td>${x.last}</td><td><button class="btn text">查看对局</button></td></tr>`).join(''):empty(11,'产生对局后生成成绩排名')}</tbody></table>`;
     if(tab==='matches'){
       const matches=hasData?[
         ['PK202608130018','组队PK','产品中心 vs 客户成功部','56 : 48','产品中心胜','2026-08-13 16:08','2026-08-13 16:12','已完成'],
         ['PK202608130017','组队PK','销售中心 vs 产品中心','42 : 50','产品中心胜','2026-08-13 15:42','2026-08-13 15:46','已完成'],
         ['PK202608130016','组队PK','客户成功部 vs 销售中心','38 : 38','平局','2026-08-13 15:20','2026-08-13 15:24','已完成']
       ]:[];
-      return `<table class="data-table"><thead><tr><th>对局编号</th><th>PK类型</th><th>对战双方</th><th>比分</th><th>胜负结果</th><th>开始时间</th><th>结束时间</th><th>对局状态</th><th>操作</th></tr></thead><tbody>${matches.length?matches.map(x=>`<tr>${x.map(v=>`<td>${v}</td>`).join('')}<td><button class="btn text">查看详情</button></td></tr>`).join(''):empty(9,'活动开始后生成对局记录')}</tbody></table>`
+      return `<table class="data-table"><thead><tr><th>对局编号</th><th>PK类型</th><th>对战双方</th><th>比分</th><th>胜负结果</th><th>开始时间</th><th>结束时间</th><th>对局状态</th><th>操作</th></tr></thead><tbody>${matches.length?matches.map(x=>`<tr>${x.map(v=>`<td>${v}</td>`).join('')}<td><button class="btn text">查看详情</button></td></tr>`).join(''):empty(9,'产生对局后生成对局记录')}</tbody></table>`
     }
-    if(tab==='questions')return `<table class="data-table"><thead><tr><th>题目</th><th>题型</th><th>作答次数</th><th>答对</th><th>答错/未作答</th><th>正确率</th><th>平均用时</th></tr></thead><tbody>${hasData?(a.questionSnapshot||questions.slice(0,4)).map((q,i)=>`<tr><td>${escapeHtml(q.title)}</td><td>${q.type}</td><td>${248-i*7}</td><td>${226-i*12}</td><td>${22+i*5}</td><td>${[91.1,82.2,76.8,64.0,61.5][i]||58.2}%</td><td>${[6.8,8.1,9.2,10.4,11.0][i]||10.8}秒</td></tr>`).join(''):empty(7,'活动开始后展示客观题分析')}</tbody></table>`;
+    if(tab==='questions')return `<table class="data-table"><thead><tr><th>题目</th><th>题型</th><th>作答次数</th><th>答对</th><th>答错/未作答</th><th>正确率</th><th>平均用时</th></tr></thead><tbody>${hasData?(a.questionSnapshot||questions.slice(0,4)).map((q,i)=>`<tr><td>${escapeHtml(q.title)}</td><td>${q.type}</td><td>${248-i*7}</td><td>${226-i*12}</td><td>${22+i*5}</td><td>${[91.1,82.2,76.8,64.0,61.5][i]||58.2}%</td><td>${[6.8,8.1,9.2,10.4,11.0][i]||10.8}秒</td></tr>`).join(''):empty(7,'产生答题记录后展示客观题分析')}</tbody></table>`;
     const knowledge=[['产品定位',2,486,418,'86.0%'],['PK规则',2,472,366,'77.5%'],['数据分析',1,241,154,'63.9%']];
-    return `<table class="data-table"><thead><tr><th>知识点</th><th>关联题目数</th><th>作答次数</th><th>答对次数</th><th>正确率</th><th>操作</th></tr></thead><tbody>${hasData?knowledge.map(x=>`<tr>${x.map(v=>`<td>${v}</td>`).join('')}<td><button class="btn text">查看题目</button></td></tr>`).join(''):empty(6,'活动开始后展示知识点分析')}</tbody></table>`
+    return `<table class="data-table"><thead><tr><th>知识点</th><th>关联题目数</th><th>作答次数</th><th>答对次数</th><th>正确率</th><th>操作</th></tr></thead><tbody>${hasData?knowledge.map(x=>`<tr>${x.map(v=>`<td>${v}</td>`).join('')}<td><button class="btn text">查看题目</button></td></tr>`).join(''):empty(6,'产生答题记录后展示知识点分析')}</tbody></table>`
   }
   function bindDetailPanel(a){
-    const editable=a.status==='未开始';
+    const editable=true;
     if(state.detailTab==='basic'&&editable){bindCover();bindEditableFields(a);document.querySelector('[data-save-detail]').onclick=()=>{const name=document.querySelector('#name').value.trim();if(!name)return showError('#name','请输入PK赛名称');collectEditable(a);a.name=name;a.cover=state.selectedCover||a.cover;a.description=document.querySelector('#description').textContent.trim();saveActivity(a);toast('基本信息和PK赛设置已保存');renderDetail()}}
     if(state.detailTab==='questions'&&editable){
       document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,b.dataset.source));document.querySelectorAll('[data-add-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,a.sourceType==='paper'?'papers':'questions'));
