@@ -209,10 +209,11 @@
     if(tab==='score'&&state.rankMode==='team'&&a.mode==='组队PK')return `<table class="data-table"><thead><tr><th>排名</th><th>部门/队伍</th><th>参赛人数</th><th>对局数</th><th>胜场</th><th>胜率</th><th>对局时间</th><th>操作</th></tr></thead><tbody>${hasData?['产品中心','客户成功部','销售中心'].map((x,i)=>`<tr><td>${i+1}</td><td>${x}</td><td>${[31,28,27][i]}</td><td>${[89,82,77][i]}</td><td>${[52,46,40][i]}</td><td>${[58.4,56.1,51.9][i]}%</td><td>${['2026-08-13 16:20','2026-08-13 15:48','2026-08-13 15:12'][i]}</td><td><button class="btn text">查看详情</button></td></tr>`).join(''):empty(8,'产生对局后生成团队成绩')}</tbody></table>`;
     if(tab==='score')return `<table class="data-table"><thead><tr><th>排名</th><th>姓名</th><th>部门</th><th>参赛场次</th><th>胜场</th><th>胜率</th><th>正确率</th><th>平均答题用时</th><th>对局时间</th><th>操作</th></tr></thead><tbody>${rows.length?rows.map((x,i)=>`<tr><td>${i+1}</td><td><button class="link">${x.name}</button></td><td>${x.department}</td><td>${x.matches}</td><td>${x.wins}</td><td>${(x.wins/x.matches*100).toFixed(1)}%</td><td>${x.accuracy}</td><td>${x.avgTime}</td><td>${x.last}</td><td><button class="btn text">查看详情</button></td></tr>`).join(''):empty(10,'产生对局后生成成绩排名')}</tbody></table>`;
     if(tab==='matches'){
+      const learnerLabel=id=>{const learner=learners.find(x=>x.id===id);return learner?`${learner.name}（${learner.department}）`:'--'};
       const matches=hasData?[
-        ['PK202608130018','产品中心 vs 客户成功部','56 : 48','2026-08-13 16:08'],
-        ['PK202608130017','销售中心 vs 产品中心','42 : 50','2026-08-13 15:42'],
-        ['PK202608130016','客户成功部 vs 销售中心','38 : 38','2026-08-13 15:20']
+        ['PK202608130018',`${learnerLabel('u1')} vs ${learnerLabel('u3')}`,'56 : 48','2026-08-13 16:08'],
+        ['PK202608130017',`${learnerLabel('u5')} vs ${learnerLabel('u2')}`,'42 : 50','2026-08-13 15:42'],
+        ['PK202608130016',`${learnerLabel('u4')} vs ${learnerLabel('u6')}`,'38 : 38','2026-08-13 15:20']
       ]:[];
       return `<table class="data-table"><thead><tr><th>对局编号</th><th>对战双方</th><th>比分</th><th>对局时间</th></tr></thead><tbody>${matches.length?matches.map(x=>`<tr>${x.map(v=>`<td>${v}</td>`).join('')}</tr>`).join(''):empty(4,'产生对局后生成对局记录')}</tbody></table>`
     }
