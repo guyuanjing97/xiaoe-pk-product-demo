@@ -17,7 +17,7 @@
   ];
   const fallbackActivity = {
     id: 'pk-demo-fallback', name: '产品知识组队体验赛', description: '通过实时知识对战巩固产品与服务规范。',
-    status: '可参与', storeDisplay: '显示', mode: '1v1PK', teamSize: 3,
+    status: '可参与', shelfStatus: '立即上架', timedUnpublish: false, storeDisplay: '显示', mode: '1v1PK', teamSize: 3,
     groupMatchMode: 'department_vs_department', participantDepartments: ['产品中心', '客户成功部'], aiFallback: true, questionCount: 5, seconds: 15, nextIntervalSeconds: 2,
     baseScore: 10, wrongScore: -2, timeBonus: true, bonusPerSecond: 1,
     sourceName: '新人产品知识试卷', learnerIds: ['u1', 'u2', 'u4', 'u7'], attempts: 5,
@@ -73,8 +73,18 @@
     if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
     return data;
   }
+  function shelfState(activity) {
+    if (activity?.manualStoppedAt || activity?.shelfStatus === '已停用' || activity?.status === '已停用') return '已停用';
+    if (activity?.shelfStatus === '已下架') return '已下架';
+    if (activity?.shelfStatus === '暂不上架') return '未上架';
+    const shelfAt = new Date(activity?.shelfAt).getTime();
+    const unpublishAt = new Date(activity?.unpublishAt).getTime();
+    if (activity?.shelfStatus === '定时上架' && Number.isFinite(shelfAt) && Date.now() < shelfAt) return '未上架';
+    if (activity?.timedUnpublish && Number.isFinite(unpublishAt) && Date.now() >= unpublishAt) return '已下架';
+    return '已上架';
+  }
   function derivedStatus(activity) {
-    return activity?.storeDisplay === '隐藏' ? '已隐藏' : '可参与';
+    return shelfState(activity) === '已上架' ? '可参与' : shelfState(activity);
   }
   function normalizeQuestion(question, index) {
     const fallback = fallbackQuestions[index % fallbackQuestions.length];
@@ -106,7 +116,7 @@
     return !activity.learnerIds?.length || activity.learnerIds.includes(currentUser.id);
   }
   function visibleInLearnerSide(activity) {
-    return activity?.storeDisplay !== '隐藏';
+    return activity?.storeDisplay !== '隐藏' && shelfState(activity) === '已上架';
   }
   const dataFingerprint = value => JSON.stringify(value);
   async function loadActivities({ preserve = true, forceRender = false } = {}) {
