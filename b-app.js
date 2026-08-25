@@ -7,12 +7,23 @@
     {id:'cover-3',name:'知识训练主题',url:'assets/pk-c-visuals/empty-activity.png'}
   ];
   const questions=[
-    {id:'q1',title:'小鹅通企学院的核心定位是？',type:'单选题',difficulty:'简单',options:['企业培训工具','企业学习平台','企业营销平台','企业管理系统'],correct:1},
-    {id:'q2',title:'PK赛可以复用企学院现有哪类资产？',type:'多选题',difficulty:'简单',options:['题库题目','试卷','课程评论','直播回放'],correct:[0,1]},
-    {id:'q3',title:'组队PK中，每题以本队最快提交者的答案为准。',type:'判断题',difficulty:'简单',options:['正确','错误'],correct:0},
-    {id:'q4',title:'双方都答对时，如何计算速度加分？',type:'单选题',difficulty:'适中',options:['按剩余时间','按双方用时差','固定加5分','不加分'],correct:1},
-    {id:'q5',title:'PK数据分析应包含哪些指标？',type:'多选题',difficulty:'适中',options:['参与人数','胜负场次','题目正确率','学员积分'],correct:[0,1,2,3]},
-    {id:'q6',title:'管理员隐藏PK赛后，学员端不再展示该PK赛。',type:'判断题',difficulty:'简单',options:['正确','错误'],correct:0}
+    {id:'q1',title:'小鹅通企学院的核心定位是？',type:'单选题',difficulty:'简单',category:'默认分类',score:2,options:['企业培训工具','企业学习平台','企业营销平台','企业管理系统'],correct:1},
+    {id:'q2',title:'PK赛可以复用企学院现有哪类资产？',type:'多选题',difficulty:'简单',category:'默认分类',score:2,options:['题库题目','试卷','课程评论','直播回放'],correct:[0,1]},
+    {id:'q3',title:'组队PK中，每题以本队最快提交者的答案为准。',type:'判断题',difficulty:'简单',category:'填空题',score:2,options:['正确','错误'],correct:0},
+    {id:'q4',title:'双方都答对时，如何计算速度加分？',type:'单选题',difficulty:'适中',category:'销售',score:2,options:['按剩余时间','按双方用时差','固定加5分','不加分'],correct:1},
+    {id:'q5',title:'PK数据分析应包含哪些指标？',type:'多选题',difficulty:'适中',category:'测试',score:2,options:['参与人数','胜负场次','题目正确率','学员积分'],correct:[0,1,2,3]},
+    {id:'q6',title:'管理员隐藏PK赛后，学员端不再展示该PK赛。',type:'判断题',difficulty:'简单',category:'法务',score:2,options:['正确','错误'],correct:0}
+  ];
+  const questionCategories=[
+    {id:'all',name:'所有题目',count:79,children:[
+      {id:'default',name:'默认分类',count:26,categories:['默认分类']},
+      {id:'fill',name:'填空题',count:0,categories:['填空题']},
+      {id:'sales',name:'销售',count:1,categories:['销售']},
+      {id:'chinese',name:'语文',count:3,categories:['默认分类','填空题']},
+      {id:'law',name:'法务',count:1,categories:['法务']},
+      {id:'test',name:'测试',count:38,categories:['测试']},
+      {id:'homework',name:'作业',count:10,categories:['默认分类','销售','测试']}
+    ]}
   ];
   const papers=[
     {id:'p1',name:'新人产品知识试卷',count:5,total:50,random:'关闭',questionIds:['q1','q2','q3','q4','q5']},
@@ -41,7 +52,7 @@
     {...defaultActivity(),id:'demo-hidden',name:'信息安全挑战赛',cover:covers[2].url,mode:'1v1PK',questionCount:4,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,4),shelfStatus:'已下架',participants:72,createdAt:'2026-07-01 09:20:00'},
     {...defaultActivity(),id:'demo-stopped',name:'合规知识PK赛',cover:covers[0].url,mode:'1v1PK',questionCount:5,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,5),shelfStatus:'已停用',manualStoppedAt:new Date(now.getTime()-2*60*60*1000).toISOString(),participants:64,createdAt:'2026-07-18 10:00:00'}
   ];
-  const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),userSearch:'',userDepartment:'全部',userParticipation:'全部',analysisOverviewHidden:false,expandedQuestion:'q1'};
+  const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),systemPicked:new Set(['default','fill','sales','law']),systemCounts:{'单选题':5,'多选题':0,'不定项选择题':0,'判断题':3,'问答题':0,'材料题':0},userSearch:'',userDepartment:'全部',userParticipation:'全部',analysisOverviewHidden:false,expandedQuestion:'q1'};
   const app=document.querySelector('#app'),breadcrumb=document.querySelector('#breadcrumb'),modalRoot=document.querySelector('#modalRoot'),toastEl=document.querySelector('#toast');
   const escapeHtml=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}};
@@ -186,9 +197,12 @@
   }
   function questionPanel(a,editable=true){
     const selected=a.questionSnapshot||[];
-    if(!selected.length)return `<div class="panel-head"><h2>题目设置</h2></div><div class="choose-source"><button class="source-card" data-source="questions">＋ 从题库中添加题目</button><button class="source-card" data-source="papers">＋ 从试卷库中选择试卷</button></div><div class="empty-state"><div><div class="empty-icon">▤</div><p>暂未添加题目</p><span>添加题目后才可开始PK赛</span></div></div>`;
     const typeCounts=selected.reduce((map,q)=>(map[q.type]=(map[q.type]||0)+1,map),{});
-    return `<div class="panel-head"><h2>题目设置</h2></div><div class="question-layout"><main class="paper-preview">${editable?'<button class="replace-paper" data-add-source>＋ 更换题目</button>':''}<div class="paper-title"><h3>${escapeHtml(a.sourceName||'PK赛题目')}</h3><span>共 ${selected.length} 题</span></div>${selected.map((q,i)=>`<article class="question-item"><div class="question-title">${i+1}. （${q.type}）${escapeHtml(q.title)}</div><div class="question-options">${(q.options||[]).map((option,index)=>`<div><span>${String.fromCharCode(65+index)}</span>${escapeHtml(option)}</div>`).join('')}</div></article>`).join('')}</main><aside class="paper-aside"><h3>题目信息与设置</h3><p>共${selected.length}题</p><div class="paper-types">${Object.entries(typeCounts).map(([type,count])=>`<div><span>${type}</span><span>共${count}题</span></div>`).join('')}</div>${editable?'<button class="btn paper-edit" data-add-source>编辑题目</button>':''}<div class="aside-rule"><b>PK计分规则</b><span>答对 ${a.baseScore||10} 分</span><span>答错或未作答 ${a.wrongScore??-2} 分</span></div></aside></div>`
+    const totalScore=selected.reduce((sum,q)=>sum+Number(q.score||2),0);
+    const actionButtons=editable?`<div class="exam-actions"><button class="source-card" data-source="questions">＋ 手动选题</button><button class="source-card" data-source="system">＋ 系统抽题</button></div>`:'';
+    const preview=selected.length?selected.map((q,i)=>`<article class="question-item"><div class="question-title">${i+1}. （${q.type}，${q.score||2}分）${escapeHtml(q.title)}</div><div class="question-options">${(q.options||[]).map((option,index)=>`<div><span>${String.fromCharCode(65+index)}</span>${escapeHtml(option)}</div>`).join('')}</div><div class="score-line"><span>分值：</span><input class="score-input" value="${q.score||2}" readonly><span>分</span></div></article>`).join(''):`<div class="exam-empty"><div><b>123</b><span>共0题，总计0分</span></div><p>请通过手动选题或系统抽题添加题目</p></div>`;
+    const aside=selected.length?Object.entries(typeCounts).map(([type,count])=>`<div><span>${type}</span><span>共${count}题</span><button class="type-eye" title="隐藏/显示">◎</button></div>`).join(''):'<p class="help">共0题，总计0分</p>';
+    return `<div class="exam-step"><div class="step active">1 设置试卷信息</div><div class="step active">2 组卷</div></div><div class="exam-compose"><main class="exam-main"><div class="paper-title exam-total"><h3>${a.sourceName==='系统抽题'?'系统抽题':'123'}</h3><span>共${selected.length}题，总计${totalScore}分</span></div>${actionButtons}<div class="paper-preview exam-preview">${preview}</div></main><aside class="paper-aside exam-aside"><h3>试卷信息与设置</h3><p>共${selected.length}题，总计${totalScore}分</p><div class="paper-types">${aside}</div>${editable?'<button class="btn paper-edit" data-batch-score>批量设置分值</button><button class="btn paper-edit" data-random-setting>随机试卷设置</button>':''}</aside></div><div class="form-footer"><button class="btn" disabled>上一步</button><button class="btn primary" data-finish-questions>完成</button></div>`
   }
   function usersPanel(a){
     const dept=state.userDepartment,term=state.userSearch.toLowerCase(),participation=state.userParticipation;
@@ -234,8 +248,11 @@
     const editable=true;
     if(state.detailTab==='basic'&&editable){bindCover();bindEditableFields(a);document.querySelector('[data-save-detail]').onclick=()=>{const name=document.querySelector('#name').value.trim();if(!name)return showError('#name','请输入PK赛名称');collectEditable(a);a.name=name;a.cover=state.selectedCover||a.cover;a.description=document.querySelector('#description').textContent.trim();saveActivity(a);toast('基本信息和PK赛设置已保存');renderDetail()}}
     if(state.detailTab==='questions'&&editable){
-      document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,b.dataset.source));document.querySelectorAll('[data-add-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,a.sourceType==='paper'?'papers':'questions'));
-      document.querySelectorAll('[data-remove-q]').forEach(b=>b.onclick=()=>{a.questionSnapshot=a.questionSnapshot.filter(q=>q.id!==b.dataset.removeQ);a.questionCount=a.questionSnapshot.length;a.sourceIds=a.questionSnapshot.map(q=>q.id);a.setupComplete=a.questionCount>0;saveActivity(a);renderDetail()})
+      document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>b.dataset.source==='system'?openSystemDraw(a):openQuestionPicker(a,b.dataset.source));document.querySelectorAll('[data-add-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,a.sourceType==='paper'?'papers':'questions'));
+      document.querySelectorAll('[data-remove-q]').forEach(b=>b.onclick=()=>{a.questionSnapshot=a.questionSnapshot.filter(q=>q.id!==b.dataset.removeQ);a.questionCount=a.questionSnapshot.length;a.sourceIds=a.questionSnapshot.map(q=>q.id);a.setupComplete=a.questionCount>0;saveActivity(a);renderDetail()});
+      document.querySelector('[data-batch-score]')?.addEventListener('click',()=>openBatchScore(a));
+      document.querySelector('[data-random-setting]')?.addEventListener('click',()=>toast('随机试卷设置沿用试卷配置组件'));
+      document.querySelector('[data-finish-questions]')?.addEventListener('click',()=>{a.setupComplete=(a.questionSnapshot||[]).length>0;saveActivity(a);toast('题目设置已保存')})
     }
     if(state.detailTab==='publish'&&editable){bindEditableFields(a);document.querySelector('[data-save-detail]').onclick=()=>{collectEditable(a);saveActivity(a);toast('上架设置已保存');renderDetail()}}
     if(state.detailTab==='users'){document.querySelector('[data-filter-users]').onclick=()=>{state.userSearch=document.querySelector('#userSearch').value.trim();state.userDepartment=document.querySelector('#userDepartment').value;state.userParticipation=document.querySelector('#userParticipation').value;renderDetail()};document.querySelector('[data-reset-users]').onclick=()=>{state.userSearch='';state.userDepartment='全部';state.userParticipation='全部';renderDetail()};document.querySelector('[data-add-users]')?.addEventListener('click',()=>openLearnerPicker(a));document.querySelector('[data-export-users]').onclick=()=>toast('用户列表已导出')}
@@ -252,10 +269,39 @@
   }
   function openQuestionPicker(a,type){
     state.pickerType=type;state.picked=new Set(type==='questions'?(a.sourceIds||[]):a.sourceId?[a.sourceId]:[]);
-    modalRoot.innerHTML=`<div class="modal"><div class="dialog"><div class="dialog-head"><h3>选择题目/试卷</h3><button data-close>×</button></div><div class="dialog-body"><div class="picker-tabs"><button class="${type==='questions'?'active':''}" data-picker-tab="questions">从题库中添加题目</button><button class="${type==='papers'?'active':''}" data-picker-tab="papers">从试卷库中选择试卷</button></div><div class="picker-layout"><aside class="picker-side"><div class="active">全部${type==='questions'?'题目':'试卷'}</div><div>默认分类</div><div>新员工培训</div><div>产品知识</div></aside><section class="picker-main" id="pickerContent"></section></div></div><div class="dialog-foot"><span style="margin-right:auto" id="pickedCount"></span><button class="btn" data-close>取消</button><button class="btn primary" data-picker-confirm>确认</button></div></div></div>`;
-    const renderPicker=()=>{const list=state.pickerType==='questions'?questions:papers;modalRoot.querySelector('#pickerContent').innerHTML=`<div class="filter-strip"><input placeholder="请输入关键字"><button class="btn primary">搜索</button></div><table class="data-table"><thead><tr><th></th><th>${state.pickerType==='questions'?'题目':'试卷'}</th><th>${state.pickerType==='questions'?'题型':'随机试卷'}</th><th>${state.pickerType==='questions'?'难度':'题目'}</th>${state.pickerType==='papers'?'<th>总分</th>':''}</tr></thead><tbody>${list.map(x=>`<tr><td><input type="${state.pickerType==='questions'?'checkbox':'radio'}" name="pick" value="${x.id}" ${state.picked.has(x.id)?'checked':''}></td><td>${escapeHtml(x.title||x.name)}</td><td>${x.type||x.random}</td><td>${x.difficulty||x.count+'题'}</td>${state.pickerType==='papers'?`<td>${x.total}分</td>`:''}</tr>`).join('')}</tbody></table>`;modalRoot.querySelectorAll('input[name="pick"]').forEach(x=>x.onchange=()=>{if(state.pickerType==='papers')state.picked=new Set([x.value]);else x.checked?state.picked.add(x.value):state.picked.delete(x.value);modalRoot.querySelector('#pickedCount').textContent=`已选 ${state.picked.size} 项`});modalRoot.querySelector('#pickedCount').textContent=`已选 ${state.picked.size} 项`};
-    renderPicker();modalRoot.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>modalRoot.innerHTML='');modalRoot.querySelectorAll('[data-picker-tab]').forEach(x=>x.onclick=()=>{state.pickerType=x.dataset.pickerTab;state.picked=new Set();modalRoot.querySelectorAll('[data-picker-tab]').forEach(y=>y.classList.toggle('active',y===x));renderPicker()});
-    modalRoot.querySelector('[data-picker-confirm]').onclick=()=>{if(!state.picked.size)return toast('请至少选择一项');if(state.pickerType==='papers'){const p=papers.find(x=>state.picked.has(x.id));a.sourceType='paper';a.sourceId=p.id;a.sourceName=p.name;a.sourceIds=p.questionIds;a.questionSnapshot=p.questionIds.map(id=>questions.find(q=>q.id===id)).filter(Boolean)}else{a.sourceType='questions';a.sourceId='';a.sourceName='题库选题';a.sourceIds=[...state.picked];a.questionSnapshot=a.sourceIds.map(id=>questions.find(q=>q.id===id)).filter(Boolean)}a.questionCount=a.questionSnapshot.length;a.setupComplete=a.questionCount>0;saveActivity(a);modalRoot.innerHTML='';toast('题目设置已保存');renderDetail()}
+    modalRoot.innerHTML=`<div class="modal"><div class="dialog paper-dialog"><div class="dialog-head"><h3>添加题目</h3><button data-close>×</button></div><div class="dialog-body picker-body"><div class="paper-picker-layout"><aside class="picker-side question-tree"><div class="search-mini"><input placeholder="输入题库分类、名称搜索"><span>⌕</span></div><div class="tree-node open">⌄ 所有题目 <em>79</em></div>${questionCategories[0].children.map(x=>`<label class="tree-row"><input type="checkbox" checked disabled><span>${x.name}</span><em>${x.count}</em></label>`).join('')}</aside><section class="picker-main"><div class="picker-toolbar"><button class="btn">新建⌄</button><button class="btn text">⟳ 刷新</button><select class="select"><option>全部题型</option><option>单选题</option><option>多选题</option><option>判断题</option></select><input class="input" placeholder="输入题目名称"><button class="btn">⌕</button></div><table class="data-table compact"><thead><tr><th><input type="checkbox" data-pick-all></th><th>题目</th></tr></thead><tbody>${questions.map(x=>`<tr><td><input type="checkbox" name="pick" value="${x.id}" ${state.picked.has(x.id)?'checked':''}></td><td><span class="question-name">[${x.type}] ${escapeHtml(x.title)}</span></td></tr>`).join('')}</tbody></table></section></div></div><div class="dialog-foot"><label class="picked-check"><input type="checkbox" disabled> 选中本页</label><span class="help" id="pickedCount">已选0条</span><div class="pager-mini">共79条，每页<select><option>10</option></select>条 <b>1</b> 2 3 4 5 ... 8 〉 跳至<input value=""/>页</div><button class="btn" data-close>取消</button><button class="btn primary" data-picker-confirm>确认</button></div></div></div>`;
+    const update=()=>modalRoot.querySelector('#pickedCount').textContent=`已选${state.picked.size}条`;
+    modalRoot.querySelectorAll('input[name="pick"]').forEach(x=>x.onchange=()=>{x.checked?state.picked.add(x.value):state.picked.delete(x.value);update()});
+    modalRoot.querySelector('[data-pick-all]').onchange=e=>{modalRoot.querySelectorAll('input[name="pick"]').forEach(x=>{x.checked=e.target.checked;x.checked?state.picked.add(x.value):state.picked.delete(x.value)});update()};
+    update();modalRoot.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>modalRoot.innerHTML='');
+    modalRoot.querySelector('[data-picker-confirm]').onclick=()=>{if(!state.picked.size)return toast('请至少选择一项');a.sourceType='questions';a.sourceId='';a.sourceName='123';a.sourceIds=[...state.picked];a.questionSnapshot=a.sourceIds.map(id=>questions.find(q=>q.id===id)).filter(Boolean);a.questionCount=a.questionSnapshot.length;a.setupComplete=a.questionCount>0;saveActivity(a);modalRoot.innerHTML='';toast('题目设置已保存');renderDetail()}
+  }
+  function openSystemDraw(a){
+    const renderCategoryStep=()=>{
+      modalRoot.innerHTML=`<div class="modal"><div class="dialog small"><div class="dialog-head"><h3>系统抽题</h3><button data-close>×</button></div><div class="dialog-body system-draw"><div class="draw-head"><span>题库分类</span><input class="input" placeholder="请输入题库分类名称"></div><div class="draw-tree"><label class="tree-node open"><input type="checkbox" data-system-all ${state.systemPicked.size?'checked':''}>⌄ 所有题目(79)</label>${questionCategories[0].children.map(x=>`<label class="tree-row ${state.systemPicked.has(x.id)?'active':''}"><input type="checkbox" data-system-cat="${x.id}" ${state.systemPicked.has(x.id)?'checked':''}><span>${x.name}(${x.count})</span></label>`).join('')}</div></div><div class="dialog-foot"><button class="btn" data-close>取消</button><button class="btn primary" data-system-next>下一步</button></div></div></div>`;
+      modalRoot.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>modalRoot.innerHTML='');
+      modalRoot.querySelectorAll('[data-system-cat]').forEach(x=>x.onchange=()=>{x.checked?state.systemPicked.add(x.dataset.systemCat):state.systemPicked.delete(x.dataset.systemCat);renderCategoryStep()});
+      modalRoot.querySelector('[data-system-all]').onchange=e=>{state.systemPicked=e.target.checked?new Set(questionCategories[0].children.map(x=>x.id)):new Set();renderCategoryStep()};
+      modalRoot.querySelector('[data-system-next]').onclick=()=>{if(!state.systemPicked.size)return toast('请至少选择一个题库分类');renderCountStep()}
+    };
+    const renderCountStep=()=>{
+      const rows=[['单选题',13],['多选题',5],['不定项选择题',1],['判断题',6],['问答题',2],['材料题',1]];
+      const total=rows.reduce((sum,[type])=>sum+Number(state.systemCounts[type]||0),0);
+      modalRoot.innerHTML=`<div class="modal"><div class="dialog small"><div class="dialog-head"><h3>系统抽题 <span class="draw-selected">已选${total}题</span></h3><button data-close>×</button></div><div class="dialog-body system-count"><p>设置题型数量（单次最多抽题1000道）</p>${rows.map(([type,max])=>`<label class="count-row"><span>${type}</span><input class="input" type="number" min="0" max="${max}" data-count-type="${type}" value="${state.systemCounts[type]||0}"><em>/${max}</em></label>`).join('')}</div><div class="dialog-foot"><button class="btn" data-system-prev>上一步</button><button class="btn primary" data-system-confirm>确定</button></div></div></div>`;
+      modalRoot.querySelector('[data-close]').onclick=()=>modalRoot.innerHTML='';
+      modalRoot.querySelector('[data-system-prev]').onclick=renderCategoryStep;
+      modalRoot.querySelectorAll('[data-count-type]').forEach(x=>x.oninput=()=>{state.systemCounts[x.dataset.countType]=Math.max(0,Number(x.value||0))});
+      modalRoot.querySelector('[data-system-confirm]').onclick=()=>{const selectedCats=questionCategories[0].children.filter(x=>state.systemPicked.has(x.id)).flatMap(x=>x.categories);let pool=questions.filter(q=>selectedCats.includes(q.category));if(!pool.length)pool=questions;let snapshot=[];Object.entries(state.systemCounts).forEach(([type,count])=>{const typed=pool.filter(q=>q.type===type);for(let i=0;i<count;i++){const base=typed[i%typed.length]||pool[(snapshot.length+i)%pool.length];if(base)snapshot.push({...base,id:`${base.id}-draw-${type}-${i}`})}});if(!snapshot.length)snapshot=pool.slice(0,5);a.sourceType='system';a.sourceId='';a.sourceName='系统抽题';a.sourceIds=snapshot.map(q=>q.id);a.questionSnapshot=snapshot;a.questionCount=snapshot.length;a.setupComplete=true;saveActivity(a);modalRoot.innerHTML='';toast('系统抽题已生成');renderDetail()}
+    };
+    renderCategoryStep()
+  }
+  function openBatchScore(a){
+    const selected=a.questionSnapshot||[];
+    if(!selected.length)return toast('请先添加题目');
+    const types=[...new Set(selected.map(q=>q.type))];
+    modalRoot.innerHTML=`<div class="modal"><div class="dialog small"><div class="dialog-head"><h3>批量设置分值</h3><button data-close>×</button></div><div class="dialog-body system-count"><p>按题型统一设置分值，设置后同步更新左侧题目列表与右侧总分。</p>${types.map(type=>`<label class="count-row"><span>${type}</span><input class="input" type="number" min="0" data-score-type="${type}" value="${selected.find(q=>q.type===type)?.score||2}"><em>分</em></label>`).join('')}</div><div class="dialog-foot"><button class="btn" data-close>取消</button><button class="btn primary" data-score-confirm>确定</button></div></div></div>`;
+    modalRoot.querySelectorAll('[data-close]').forEach(x=>x.onclick=()=>modalRoot.innerHTML='');
+    modalRoot.querySelector('[data-score-confirm]').onclick=()=>{const scoreMap={};modalRoot.querySelectorAll('[data-score-type]').forEach(x=>scoreMap[x.dataset.scoreType]=Number(x.value||0));a.questionSnapshot=selected.map(q=>({...q,score:scoreMap[q.type]??q.score??2}));saveActivity(a);modalRoot.innerHTML='';toast('分值已更新');renderDetail()}
   }
   function openLearnerPicker(a){
     const selected=new Set(a.learnerIds||[]);
