@@ -1,6 +1,6 @@
 (() => {
   const KEY='xiaoe-pk-demo-v3';
-  const now=new Date(),isoLocal=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)};
+  const now=new Date(),isoLocal=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,16)},formatLocalTime=d=>{const x=new Date(d),p=n=>String(n).padStart(2,'0');return `${x.getFullYear()}-${p(x.getMonth()+1)}-${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())}:${p(x.getSeconds())}`};
   const covers=[
     {id:'cover-1',name:'蓝色PK主题',url:'assets/pk-c-visuals/pk-shield.png'},
     {id:'cover-2',name:'荣誉挑战主题',url:'assets/pk-c-visuals/trophy.png'},
@@ -52,7 +52,20 @@
     {...defaultActivity(),id:'demo-hidden',name:'信息安全挑战赛',cover:covers[2].url,mode:'1v1PK',questionCount:4,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,4),shelfStatus:'已下架',participants:72,createdAt:'2026-07-01 09:20:00'},
     {...defaultActivity(),id:'demo-stopped',name:'合规知识PK赛',cover:covers[0].url,mode:'1v1PK',questionCount:5,sourceName:'培训运营综合卷',questionSnapshot:questions.slice(0,5),shelfStatus:'已停用',manualStoppedAt:new Date(now.getTime()-2*60*60*1000).toISOString(),participants:64,createdAt:'2026-07-18 10:00:00'}
   ];
-  const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),systemPicked:new Set(['default','fill','sales','law']),systemCounts:{'单选题':5,'多选题':0,'不定项选择题':0,'判断题':3,'问答题':0,'材料题':0},userSearch:'',userDepartment:'全部',userParticipation:'全部',analysisOverviewHidden:false,expandedQuestion:'q1'};
+  const demoLogs=[
+    {id:'log-demo-1',time:'2026-08-08 14:10:00',activityId:'demo-new',activityName:'新员工产品知识PK赛',action:'创建PK赛',content:'创建了“新员工产品知识PK赛”',operator:'管理员'},
+    {id:'log-demo-2',time:'2026-07-10 16:30:00',activityId:'demo-active',activityName:'产品知识部门挑战赛',action:'创建PK赛',content:'创建了“产品知识部门挑战赛”',operator:'管理员'},
+    {id:'log-demo-3',time:'2026-07-18 10:20:00',activityId:'demo-stopped',activityName:'合规知识PK赛',action:'修改名称',content:'将名称修改为“合规知识PK赛”',operator:'管理员'},
+    {id:'log-demo-4',time:'2026-07-01 09:20:00',activityId:'demo-hidden',activityName:'信息安全挑战赛',action:'删除PK赛',content:'删除了“信息安全挑战赛”',operator:'管理员'}
+  ];
+  const parseLogs=()=>{try{const raw=JSON.parse(localStorage.getItem(`${KEY}-logs`)||'[]');return Array.isArray(raw)?raw:[]}catch{return []}};
+  const getActivityLogs=()=>[...parseLogs(),...demoLogs].sort((a,b)=>new Date(b.time)-new Date(a.time));
+  const pushActivityLog=log=>{
+    const logs=parseLogs().filter(x=>x.id!==log.id).slice(0,199);
+    logs.unshift({...log,time:log.time||formatLocalTime(new Date())});
+    localStorage.setItem(`${KEY}-logs`,JSON.stringify(logs));
+  };
+  const state={view:'list',detailTab:'questions',current:null,filters:{name:'',status:'全部',manager:''},moreId:null,dataTab:'score',rankMode:'personal',selectedCover:'',pickerType:'questions',picked:new Set(),systemPicked:new Set(['default','fill','sales','law']),systemCounts:{'单选题':5,'多选题':0,'不定项选择题':0,'判断题':3,'问答题':0,'材料题':0},userSearch:'',userDepartment:'全部',userParticipation:'全部',logKeyword:'',logAction:'全部',analysisOverviewHidden:false,expandedQuestion:'q1'};
   const app=document.querySelector('#app'),breadcrumb=document.querySelector('#breadcrumb'),modalRoot=document.querySelector('#modalRoot'),toastEl=document.querySelector('#toast');
   const escapeHtml=(s='')=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const getSaved=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}};
@@ -70,8 +83,10 @@
   const toast=text=>{toastEl.textContent=text;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),1800)};
   const setBreadcrumb=text=>breadcrumb.textContent=text;
   const statusDot=s=>s==='已上架'?'green':'gray';
+  document.querySelectorAll('.sidebar [data-view]').forEach(el=>el.addEventListener('click',()=>{state.view=el.dataset.view;render()}));
 
-  function render(){modalRoot.innerHTML='';if(state.view==='list')renderList();else if(state.view==='create')renderCreate();else renderDetail()}
+  function syncSidebar(){document.querySelectorAll('.sidebar [data-view]').forEach(el=>el.classList.toggle('active',(state.view==='logs'&&el.dataset.view==='logs')||(state.view!=='logs'&&el.dataset.view==='list')))}
+  function render(){modalRoot.innerHTML='';syncSidebar();if(state.view==='list')renderList();else if(state.view==='create')renderCreate();else if(state.view==='logs')renderLogs();else renderDetail()}
   function renderList(){
     setBreadcrumb('PK赛');
     const rows=getRows().filter(x=>(!state.filters.name||x.name.includes(state.filters.name))&&(state.filters.status==='全部'||x.status===state.filters.status)&&(!state.filters.manager||(x.manager||'管理员').includes(state.filters.manager)));
@@ -98,22 +113,30 @@
     app.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.copy);state.current={...item,id:'pk-'+Date.now(),name:item.name+'（副本）',shelfStatus:'暂不上架',manualStoppedAt:null,storeDisplay:'显示',status:'未上架',createdAt:new Date().toLocaleString('zh-CN',{hour12:false}).replaceAll('/','-')};state.view='create';render()});
     app.querySelectorAll('[data-toggle-shelf]').forEach(b=>b.onclick=()=>toggleShelfAction(findActivity(b.dataset.toggleShelf)));
     app.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>stopActivity(findActivity(b.dataset.stop)));
-    app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.delete);if(!confirm(`确认删除“${item.name}”吗？删除后不可恢复。`))return;if(getSaved()?.id===item.id)localStorage.removeItem(KEY);state.moreId=null;toast('PK赛已删除');render()});
+    app.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>{const item=findActivity(b.dataset.delete);      if(!confirm(`确认删除“${item.name}”吗？删除后不可恢复。`))return;if(getSaved()?.id===item.id)localStorage.removeItem(KEY);pushActivityLog({id:`log-delete-${item.id}-${Date.now()}`,activityId:item.id,activityName:item.name,action:'删除PK赛',content:`删除了“${item.name}”`,operator:'管理员'});state.moreId=null;toast('PK赛已删除');render()});
   }
   function findActivity(id){return getRows().find(x=>x.id===id)||getRows()[0]}
   function toggleShelfAction(item){
     const status=shelfState(item);
     if(status==='已上架'){
       if(!confirm(`确认下架“${item.name}”吗？下架后学员端将不再展示和参与该PK赛。`))return;
-      item.shelfStatus='已下架';item.manualStoppedAt=null;saveActivity(item);state.moreId=null;toast('下架成功');render();return;
+      item.shelfStatus='已下架';item.manualStoppedAt=null;saveActivity(item);pushActivityLog({id:`log-shelf-down-${item.id}-${Date.now()}`,activityId:item.id,activityName:item.name,action:'下架',content:`将“${item.name}”下架`,operator:'管理员'});state.moreId=null;toast('下架成功');render();return;
     }
     if(status==='未上架'||status==='已下架'||status==='已停用'){
-      item.shelfStatus='立即上架';item.manualStoppedAt=null;item.storeDisplay='显示';saveActivity(item);state.moreId=null;toast('上架成功');render();return;
+      item.shelfStatus='立即上架';item.manualStoppedAt=null;item.storeDisplay='显示';saveActivity(item);pushActivityLog({id:`log-shelf-up-${item.id}-${Date.now()}`,activityId:item.id,activityName:item.name,action:'上架',content:`将“${item.name}”上架`,operator:'管理员'});state.moreId=null;toast('上架成功');render();return;
     }
   }
   function stopActivity(item){
     if(!confirm(`确认停用“${item.name}”吗？停用后学员之后不能参与该PK赛。`))return;
-    item.shelfStatus='已停用';item.manualStoppedAt=new Date().toISOString();saveActivity(item);state.moreId=null;toast('已停用');render();
+    item.shelfStatus='已停用';item.manualStoppedAt=new Date().toISOString();saveActivity(item);pushActivityLog({id:`log-stop-${item.id}-${Date.now()}`,activityId:item.id,activityName:item.name,action:'停用',content:`停用了“${item.name}”`,operator:'管理员'});state.moreId=null;toast('已停用');render();
+  }
+
+  function renderLogs(){
+    setBreadcrumb('操作日志');
+    const logs=getActivityLogs().filter(x=>(!state.logKeyword||x.activityName.includes(state.logKeyword)||x.action.includes(state.logKeyword)||x.content.includes(state.logKeyword))&&(state.logAction==='全部'||x.action===state.logAction));
+    app.innerHTML=`<section class="page page-pad"><div class="toolbar"><button class="btn primary" data-create>新建PK赛</button><button class="btn" data-bank>题库</button><button class="btn text">PK赛使用教程</button><span class="spacer"></span></div><div class="filter-panel"><label class="field-inline"><span>关键字</span><input id="logKeyword" placeholder="请输入PK赛名称或操作内容" value="${escapeHtml(state.logKeyword)}"></label><label class="field-inline small"><span>操作类型</span><select id="logAction">${['全部','创建PK赛','删除PK赛','修改名称','下架','上架','停用'].map(x=>`<option ${x===state.logAction?'selected':''}>${x}</option>`).join('')}</select></label><button class="btn primary" data-filter-log>筛选</button><button class="btn text" data-reset-log>重置筛选条件</button></div><table class="data-table"><thead><tr><th>操作时间</th><th>PK赛名称</th><th>操作类型</th><th>操作内容</th><th>操作人</th></tr></thead><tbody>${logs.length?logs.map(log=>`<tr><td>${escapeHtml(log.time)}</td><td>${escapeHtml(log.activityName)}</td><td>${escapeHtml(log.action)}</td><td>${escapeHtml(log.content)}</td><td>${escapeHtml(log.operator||'管理员')}</td></tr>`).join(''):'<tr><td colspan="5" style="text-align:center;height:220px;color:#9aa1aa">暂无操作日志</td></tr>'}</tbody></table><div class="pagination"><span>共${logs.length}条，每页10条</span><button class="active">1</button></div></section>`;
+    app.querySelector('[data-filter-log]').onclick=()=>{state.logKeyword=document.querySelector('#logKeyword').value.trim();state.logAction=document.querySelector('#logAction').value;render()};
+    app.querySelector('[data-reset-log]').onclick=()=>{state.logKeyword='';state.logAction='全部';render()};
   }
 
   function renderCreate(){
@@ -130,7 +153,7 @@
       if(!name){const input=document.querySelector('#name');input.classList.add('error');input.parentElement.querySelector('.error-text').textContent='请输入PK赛名称';missing.push(input)}
       if(!cover){const box=document.querySelector('.cover-box');box.classList.add('error');document.querySelector('#coverError').textContent='请选择PK赛封面';missing.push(box)}
       if(missing.length){missing[0].scrollIntoView({behavior:'smooth',block:'center'});missing[0].focus?.();return}
-      collectEditable(a);a.name=name;a.cover=cover;a.setupComplete=false;saveActivity(a);toast('PK赛已创建，请继续添加题目');state.view='detail';state.detailTab='questions';state.current=a;setTimeout(render,300)
+      collectEditable(a);      a.name=name;a.cover=cover;a.setupComplete=false;saveActivity(a);pushActivityLog({id:`log-create-${a.id}`,activityId:a.id,activityName:a.name,action:'创建PK赛',content:`创建了“${a.name}”`,operator:'管理员'});toast('PK赛已创建，请继续添加题目');state.view='detail';state.detailTab='questions';state.current=a;setTimeout(render,300)
     };
   }
   function basicInfoForm(a,creating=false){
@@ -246,7 +269,7 @@
   }
   function bindDetailPanel(a){
     const editable=true;
-    if(state.detailTab==='basic'&&editable){bindCover();bindEditableFields(a);document.querySelector('[data-save-detail]').onclick=()=>{const name=document.querySelector('#name').value.trim();if(!name)return showError('#name','请输入PK赛名称');collectEditable(a);a.name=name;a.cover=state.selectedCover||a.cover;a.description=document.querySelector('#description').textContent.trim();saveActivity(a);toast('基本信息和PK赛设置已保存');renderDetail()}}
+    if(state.detailTab==='basic'&&editable){bindCover();bindEditableFields(a);document.querySelector('[data-save-detail]').onclick=()=>{const name=document.querySelector('#name').value.trim();if(!name)return showError('#name','请输入PK赛名称');const oldName=a.name;collectEditable(a);a.name=name;a.cover=state.selectedCover||a.cover;a.description=document.querySelector('#description').textContent.trim();saveActivity(a);if(oldName!==a.name)pushActivityLog({id:`log-rename-${a.id}-${Date.now()}`,activityId:a.id,activityName:a.name,action:'修改名称',content:`将名称从“${oldName}”修改为“${a.name}”`,operator:'管理员'});toast('基本信息和PK赛设置已保存');renderDetail()}}
     if(state.detailTab==='questions'&&editable){
       document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>b.dataset.source==='system'?openSystemDraw(a):openQuestionPicker(a,b.dataset.source));document.querySelectorAll('[data-add-source]').forEach(b=>b.onclick=()=>openQuestionPicker(a,a.sourceType==='paper'?'papers':'questions'));
       document.querySelectorAll('[data-remove-q]').forEach(b=>b.onclick=()=>{a.questionSnapshot=a.questionSnapshot.filter(q=>q.id!==b.dataset.removeQ);a.questionCount=a.questionSnapshot.length;a.sourceIds=a.questionSnapshot.map(q=>q.id);a.setupComplete=a.questionCount>0;saveActivity(a);renderDetail()});
